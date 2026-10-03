@@ -1,0 +1,60 @@
+package connector
+
+import (
+	"context"
+	"fmt"
+	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/networkid"
+	"net/url"
+	"sort"
+	"strconv"
+	"teamsbridge.local/teamsbridge/internal/graph"
+	"time"
+)
+
+var _ bridgev2.BackfillingNetworkAPI = (*Client)(nil)
+
+func (c *Client) FetchMessages(ctx context.Context, p bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
+	if p.ThreadRoot != "" {
+		return nil, fmt.Errorf("Teams thread backfill is not supported")
+	}
+	count := p.Count
+	if count < 1 || count > 50 {
+		count = 50
+	}
+	path := string(p.Cursor)
+	if path == "" || p.Forward {
+		q := url.Values{"$top": {strconv.Itoa(count)}, "$orderby": {"createdDateTime desc"}}
+		if !p.Forward && p.AnchorMessage != nil {
+			q.Set("$filter", "createdDateTime lt "+p.AnchorMessage.Timestamp.UTC().Format(time.RFC3339Nano))
+		}
+		path = graph.ChatPath(string(p.Portal.ID)) + "/messages?" + q.Encode()
+	}
+	var page struct {
+		Value []graph.Message `json:"value"`
+		Next  string          `json:"@odata.nextLink"`
+	}
+	if err := c.api.Do(ctx, "GET", path, nil, &page); err != nil {
+		return nil, err
+	}
+	if page.Next != "" && page.Next == path {
+		return nil, fmt.Errorf("Teams returned a repeating backfill cursor")
+	}
+	out := &bridgev2.FetchMessagesResponse{Cursor: networkid.PaginationCursor(page.Next), HasMore: page.Next != "", Forward: p.Forward, MarkRead: true, AggressiveDeduplication: true}
+	for _, m := range page.Value {
+		if m.ID == "" || m.Deleted != nil || m.From.User == nil || m.From.User.ID == "" || m.MessageType != "message" {
+			continue
+		}
+		converted := c.convertChatMessage(p.Portal, m)
+		if hasImages(m) {
+			var err error
+			converted, err = c.convertMessage(ctx, p.Portal, c.main.Bridge.Bot, m)
+			if err != nil {
+				return nil, err
+			}
+		}
+		out.Messages = append(out.Messages, &bridgev2.BackfillMessage{ConvertedMessage: converted, Sender: c.sender(m.From.User.ID), ID: messageID(string(p.Portal.ID), m.ID), Timestamp: m.Created, StreamOrder: m.Created.UnixMilli()})
+	}
+	sort.SliceStable(out.Messages, func(i, j int) bool { return out.Messages[i].Timestamp.Before(out.Messages[j].Timestamp) })
+	return out, nil
+}

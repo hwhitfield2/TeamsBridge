@@ -1,0 +1,64 @@
+package connector
+
+import (
+	"bytes"
+	"context"
+	"image"
+	"image/png"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/database"
+	"maunium.net/go/mautrix/bridgev2/networkid"
+	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/id"
+	"teamsbridge.local/teamsbridge/internal/graph"
+)
+
+type mediaIntent struct {
+	bridgev2.MatrixAPI
+	uploaded int
+}
+
+func (m *mediaIntent) UploadMedia(ctx context.Context, room id.RoomID, data []byte, name, mime string) (id.ContentURIString, *event.EncryptedFileInfo, error) {
+	m.uploaded++
+	return "", &event.EncryptedFileInfo{URL: "mxc://test/encrypted"}, nil
+}
+func TestHostedImageConversion(t *testing.T) {
+	var data bytes.Buffer
+	png.Encode(&data, image.NewRGBA(image.Rect(0, 0, 12, 7)))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test" {
+			t.Error("missing auth")
+		}
+		switch r.URL.Path {
+		case "/v1.0/chats/chat/messages/msg/hostedContents":
+			w.Write([]byte(`{"value":[{"id":"image"}]}`))
+		case "/v1.0/chats/chat/messages/msg/hostedContents/image/$value":
+			w.Write(data.Bytes())
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(404)
+		}
+	}))
+	defer server.Close()
+	c := &Client{api: &graph.Client{Base: server.URL + "/v1.0", HTTP: server.Client(), Token: func(context.Context) (string, error) { return "test", nil }}}
+	m := graph.Message{ID: "msg"}
+	m.Body.ContentType = "html"
+	m.Body.Content = `<p>Screenshot</p><img src="https://untrusted.example/image">`
+	intent := &mediaIntent{}
+	p := &bridgev2.Portal{Portal: &database.Portal{PortalKey: networkid.PortalKey{ID: "chat"}, MXID: "!room:test"}}
+	got, err := c.convertMessage(context.Background(), p, intent, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if intent.uploaded != 1 || len(got.Parts) != 2 {
+		t.Fatalf("wrong parts/uploads: %d/%d", len(got.Parts), intent.uploaded)
+	}
+	pic := got.Parts[1].Content
+	if pic.MsgType != event.MsgImage || pic.Info.Width != 12 || pic.Info.Height != 7 || pic.File == nil || pic.File.URL != "mxc://test/encrypted" || pic.URL != "" {
+		t.Fatalf("incorrect encrypted image: %+v", pic)
+	}
+}

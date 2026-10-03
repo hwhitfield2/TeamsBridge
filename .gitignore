@@ -1,0 +1,12 @@
+.cache/
+bin/
+config.yaml
+registration.yaml
+*.db
+*.db-*
+*.log
+logs/
+upstream-teams/
+.DS_Store
+
+.secrets/
