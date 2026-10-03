@@ -59,7 +59,7 @@ func (c *Connector) oauth() graph.OAuth {
 	return graph.OAuth{ClientID: c.Config.ClientID, TenantID: c.Config.TenantID, SecretFile: ".secrets/client-secret"}
 }
 func (c *Connector) GetName() bridgev2.BridgeName {
-	return bridgev2.BridgeName{DisplayName: "Work Teams", NetworkURL: "https://teams.microsoft.com", NetworkID: "teamswork", NetworkIcon: "mxc://local.beeper.com/hwhitfield2_ovaP7Gn0Oiq2cJtYSUBOkm3FY6M0eWVShYOEVWZdjg99s94pyQSI62cVqcbBY8Zx", BeeperBridgeType: "teamswork", DefaultPort: 29349, DefaultCommandPrefix: "!teamswork"}
+	return bridgev2.BridgeName{DisplayName: "Microsoft Teams", NetworkURL: "https://teams.microsoft.com", NetworkID: "teamswork", NetworkIcon: "mxc://local.beeper.com/hwhitfield2_ovaP7Gn0Oiq2cJtYSUBOkm3FY6M0eWVShYOEVWZdjg99s94pyQSI62cVqcbBY8Zx", BeeperBridgeType: "teamswork", DefaultPort: 29349, DefaultCommandPrefix: "!teamswork"}
 }
 func (c *Connector) GetConfig() (string, any, up.Upgrader) {
 	return example, &c.Config, up.SimpleUpgrader(func(h up.Helper) {
@@ -76,7 +76,7 @@ func (c *Connector) GetDBMetaTypes() database.MetaTypes {
 func (c *Connector) GetCapabilities() *bridgev2.NetworkGeneralCapabilities {
 	return &bridgev2.NetworkGeneralCapabilities{}
 }
-func (c *Connector) GetBridgeInfoVersion() (int, int) { return 2, 4 }
+func (c *Connector) GetBridgeInfoVersion() (int, int) { return 3, 4 }
 func (c *Connector) LoadUserLogin(ctx context.Context, l *bridgev2.UserLogin) error {
 	m, ok := l.Metadata.(*Metadata)
 	if !ok {

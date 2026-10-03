@@ -1,4 +1,4 @@
-# Work Teams → Beeper
+# Microsoft Teams → Beeper
 
 A local Go bridge for Microsoft Teams **work/school accounts**, using delegated Microsoft Graph access and mautrix bridgev2. Runs on macOS while Beeper is open. Requires your own Microsoft app registration and Beeper bridge configuration.
 
