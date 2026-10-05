@@ -42,11 +42,13 @@ func hasImages(m graph.Message) bool {
 // untrusted HTML URLs. UploadMedia handles encryption for the destination room.
 func (c *Client) convertMessage(ctx context.Context, p *bridgev2.Portal, intent bridgev2.MatrixAPI, m graph.Message) (*bridgev2.ConvertedMessage, error) {
 	out := c.convertChatMessage(p, m)
+	hostedParts := map[string]*bridgev2.ConvertedMessagePart{}
 	defer func() {
 		if len(out.Parts) > 1 && out.Parts[0].Content.Body == "[Teams message: open Teams to view this content]" {
 			out.Parts = out.Parts[1:]
 			out.Parts[0].ID = ""
 		}
+		c.captionImages(p, m, out, hostedParts)
 		stampMessage(out, m)
 	}()
 	if err := c.appendGIFs(ctx, p, intent, m, out); err != nil {
@@ -93,7 +95,9 @@ func (c *Client) convertMessage(ctx context.Context, p *bridgev2.Portal, intent 
 		if file != nil {
 			content.URL = ""
 		}
-		out.Parts = append(out.Parts, &bridgev2.ConvertedMessagePart{ID: networkid.PartID(fmt.Sprintf("image_%d", i)), Type: event.EventMessage, Content: content})
+		part := &bridgev2.ConvertedMessagePart{ID: networkid.PartID(fmt.Sprintf("image_%d", i)), Type: event.EventMessage, Content: content}
+		hostedParts[item.ID] = part
+		out.Parts = append(out.Parts, part)
 	}
 	if len(out.Parts) > 1 && out.Parts[0].Content.Body == "[Teams message: open Teams to view this content]" {
 		out.Parts = out.Parts[1:]
@@ -144,4 +148,71 @@ func hostedImageIDs(m graph.Message) map[string]bool {
 		}
 	}
 	return refs
+}
+
+// Matrix media captions keep prose attached to its image. For interleaved Teams
+// messages, follow the HTML order (the hostedContents listing is unordered).
+func (c *Client) captionImages(p *bridgev2.Portal, m graph.Message, out *bridgev2.ConvertedMessage, hosted map[string]*bridgev2.ConvertedMessagePart) {
+	if out.MergeCaption() {
+		return
+	}
+	if len(hosted) < 2 || len(out.Parts) != len(hosted)+1 {
+		return
+	}
+	var captions []string
+	var images []*bridgev2.ConvertedMessagePart
+	var prose strings.Builder
+	z := html.NewTokenizer(strings.NewReader(m.Body.Content))
+	seen := map[string]bool{}
+	for {
+		typ := z.Next()
+		if typ == html.ErrorToken {
+			break
+		}
+		raw := string(z.Raw())
+		tok := z.Token()
+		if (typ == html.StartTagToken || typ == html.SelfClosingTagToken) && tok.Data == "img" {
+			probe := m
+			probe.Body.Content = raw
+			refs := hostedImageIDs(probe)
+			if len(refs) != 1 {
+				return
+			}
+			for key := range refs {
+				part := hosted[key]
+				if part == nil || seen[key] {
+					return
+				}
+				seen[key] = true
+				images = append(images, part)
+				captions = append(captions, prose.String())
+				prose.Reset()
+			}
+		} else {
+			prose.WriteString(raw)
+		}
+	}
+	if len(images) != len(hosted) {
+		return
+	}
+	captions[len(captions)-1] += prose.String()
+	for i, part := range images {
+		fragment := m
+		fragment.Body.Content = captions[i]
+		if i > 0 {
+			fragment.Subject = ""
+			fragment.Attachments = nil
+		}
+		text := c.convertChatMessage(p, fragment).Parts[0]
+		text.ID = part.ID
+		if i == 0 {
+			text.ID = ""
+		}
+		if text.Content.Body != "[Teams message: open Teams to view this content]" {
+			images[i] = bridgev2.MergeCaption(text, part)
+		} else {
+			part.ID = text.ID
+		}
+	}
+	out.Parts = images
 }

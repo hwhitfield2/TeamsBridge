@@ -81,11 +81,11 @@ func (c *Client) handleExisting(ctx context.Context, p *bridgev2.Portal, intent 
 	}
 	old, _ := parts[0].Metadata.(*MessageMetadata)
 	hash := contentHash(m)
-	repairGIF := len(externalGIFs(m)) > 0 && (old == nil || old.RenderingRevision < renderingRevision)
-	if messagePartsMatch(parts, hash) && !repairGIF {
+	repairMedia := hasImages(m) && (old == nil || old.RenderingRevision < renderingRevision)
+	if messagePartsMatch(parts, hash) && !repairMedia {
 		return result, nil
 	}
-	if (old == nil || old.ContentHash == "") && m.Edited == nil && !repairGIF {
+	if (old == nil || old.ContentHash == "") && m.Edited == nil && !repairMedia {
 		for _, part := range parts {
 			part.Metadata = &MessageMetadata{ContentHash: hash, PartCount: len(parts)}
 		}
