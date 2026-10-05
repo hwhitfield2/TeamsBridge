@@ -76,3 +76,16 @@ func TestCustomReactionIdentityAndImage(t *testing.T) {
 		}
 	}
 }
+
+func TestUnsupportedCustomReactionDoesNotBlockMessages(t *testing.T) {
+	c := &Client{meta: &Metadata{}, api: &graph.Client{Token: func(context.Context) (string, error) { return "test", nil }, HTTP: &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewBufferString("unsupported artwork")), Header: http.Header{}}, nil
+	})}}}
+	p := &bridgev2.Portal{Portal: &database.Portal{PortalKey: networkid.PortalKey{ID: "chat"}}}
+	r := graph.Reaction{Type: "custom", DisplayName: "party", ContentURL: "https://graph.microsoft.com/v1.0/chats/chat/messages/msg/hostedContents/emoji/$value"}
+	r.User.User = &graph.User{ID: "user"}
+	out, err := c.reactionDataWithMedia(context.Background(), p, nil, graph.Message{ID: "msg", Reactions: []graph.Reaction{r}})
+	if err != nil || out.Users["user"].Reactions[0].Emoji != ":party:" {
+		t.Fatal("unsupported custom reaction blocked message", err)
+	}
+}

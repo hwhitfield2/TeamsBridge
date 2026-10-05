@@ -56,19 +56,23 @@ func (c *Client) convertEdit(ctx context.Context, p *bridgev2.Portal, intent bri
 	if err != nil {
 		return nil, err
 	}
-	out := &bridgev2.ConvertedEdit{AddedParts: &bridgev2.ConvertedMessage{ThreadRoot: converted.ThreadRoot, ReplyTo: converted.ReplyTo}}
+	out := &bridgev2.ConvertedEdit{}
 	parts := map[networkid.PartID]*database.Message{}
 	for _, part := range existing {
 		parts[part.PartID] = part
 	}
+	// Validate before ToEditPart mutates any metadata. Matrix cannot insert
+	// additional events at an existing message's position in this timeline.
 	for _, part := range converted.Parts {
-		if old := parts[part.ID]; old != nil {
-			out.ModifiedParts = append(out.ModifiedParts, part.ToEditPart(old))
-			delete(parts, part.ID)
-		} else {
-			out.AddedParts.Parts = append(out.AddedParts.Parts, part)
+		if parts[part.ID] == nil {
+			return nil, fmt.Errorf("cannot insert additional parts into an existing Matrix message; rebuild the Beeper chat to repair its layout")
 		}
 	}
+	for _, part := range converted.Parts {
+		out.ModifiedParts = append(out.ModifiedParts, part.ToEditPart(parts[part.ID]))
+		delete(parts, part.ID)
+	}
+
 	for _, old := range parts {
 		out.DeletedParts = append(out.DeletedParts, old)
 	}
@@ -81,15 +85,11 @@ func (c *Client) handleExisting(ctx context.Context, p *bridgev2.Portal, intent 
 	}
 	old, _ := parts[0].Metadata.(*MessageMetadata)
 	hash := contentHash(m)
-	revision := 0
-	if old != nil {
-		revision = old.RenderingRevision
-	}
-	repairMedia := (hasImages(m) && revision < 3) || (len(m.Attachments) > 0 && revision < 4)
-	if messagePartsMatch(parts, hash) && !repairMedia {
+
+	if messagePartsMatch(parts, hash) {
 		return result, nil
 	}
-	if (old == nil || old.ContentHash == "") && m.Edited == nil && !repairMedia {
+	if (old == nil || old.ContentHash == "") && m.Edited == nil {
 		for _, part := range parts {
 			part.Metadata = &MessageMetadata{ContentHash: hash, PartCount: len(parts)}
 		}

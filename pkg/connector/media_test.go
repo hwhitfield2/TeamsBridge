@@ -56,16 +56,20 @@ func TestHostedImageConversion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if intent.uploaded != 1 || len(got.Parts) != 1 {
+	if intent.uploaded != 1 || len(got.Parts) != 2 {
 		t.Fatalf("wrong parts/uploads: %d/%d", len(got.Parts), intent.uploaded)
 	}
-	pic := got.Parts[0].Content
-	if pic.Body != "Screenshot" {
+	pic := got.Parts[1].Content
+	if got.Parts[0].Content.Body != "Screenshot" {
 		t.Fatalf("missing caption: %q", pic.Body)
 	}
 	if pic.MsgType != event.MsgImage || pic.Info.Width != 12 || pic.Info.Height != 7 || pic.File == nil || pic.File.URL != "mxc://test/encrypted" || pic.URL != "" {
 		t.Fatalf("incorrect encrypted image: %+v", pic)
 	}
+	if _, err := c.convertEdit(context.Background(), p, intent, []*database.Message{{PartID: ""}}, m); err == nil || !strings.Contains(err.Error(), "cannot insert additional parts") {
+		t.Fatal("layout repair must not append images to a live timeline", err)
+	}
+
 	// Forwarded images resolve under the forwarding message and retain the source
 	// hash, so subsequent polls do not repeatedly edit the imported message.
 	content, _ := json.Marshal(map[string]string{"originalMessageContent": m.Body.Content})
@@ -78,7 +82,7 @@ func TestHostedImageConversion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(forwarded.Parts) != 1 || forwarded.Parts[0].Content.File == nil || !strings.Contains(forwarded.Parts[0].Content.Body, "Screenshot") || strings.Contains(forwarded.Parts[0].Content.Body, "Attachment:") {
+	if len(forwarded.Parts) != 2 || forwarded.Parts[1].Content.File == nil || !strings.Contains(forwarded.Parts[0].Content.Body, "Screenshot") || strings.Contains(forwarded.Parts[0].Content.Body, "Attachment:") {
 		t.Fatalf("forward not rendered: %+v", forwarded)
 	}
 	if forwarded.Parts[0].DBMetadata.(*MessageMetadata).ContentHash != contentHash(forward) {
@@ -110,7 +114,7 @@ func TestUnsupportedHostedMediaDoesNotBlockHistory(t *testing.T) {
 	}
 }
 
-func TestInterleavedImageCaptionsFollowHTMLOrder(t *testing.T) {
+func TestInterleavedImagesFollowHTMLOrder(t *testing.T) {
 	c := &Client{}
 	p := &bridgev2.Portal{Portal: &database.Portal{PortalKey: networkid.PortalKey{ID: "chat"}}}
 	m := graph.Message{ID: "msg"}
@@ -120,11 +124,28 @@ func TestInterleavedImageCaptionsFollowHTMLOrder(t *testing.T) {
 	b := &bridgev2.ConvertedMessagePart{ID: "image_1", Content: &event.MessageEventContent{MsgType: event.MsgImage, Body: "b.png", FileName: "b.png", File: &event.EncryptedFileInfo{URL: "mxc://test/b"}}}
 	out := c.convertChatMessage(p, m)
 	out.Parts = append(out.Parts, a, b)
-	c.captionImages(p, m, out, map[string]*bridgev2.ConvertedMessagePart{"a": a, "b": b})
-	if len(out.Parts) != 2 || out.Parts[0].ID != "" || out.Parts[0].Content.File.URL != "mxc://test/b" || out.Parts[0].Content.Body != "First explanation" {
-		t.Fatalf("first caption/order: %+v", out.Parts)
+	c.orderImageParts(p, m, out, map[string]*bridgev2.ConvertedMessagePart{"a": a, "b": b})
+	if len(out.Parts) != 5 {
+		t.Fatalf("expected text/image/text/image/text, got %d", len(out.Parts))
 	}
-	if out.Parts[1].ID != "image_0" || !strings.Contains(out.Parts[1].Content.Body, "Second explanation") || !strings.Contains(out.Parts[1].Content.Body, "Closing text") {
-		t.Fatalf("second caption: %+v", out.Parts[1])
+	if out.Parts[0].ID != "" || out.Parts[0].Content.Body != "First explanation" || out.Parts[1].Content.File.URL != "mxc://test/b" || out.Parts[2].Content.Body != "Second explanation" || out.Parts[3].Content.File.URL != "mxc://test/a" || out.Parts[4].Content.Body != "Closing text" {
+		t.Fatal("source sequence not preserved")
+	}
+}
+
+func TestImageOnlyAndMixedGIFSourceOrder(t *testing.T) {
+	c := &Client{}
+	p := &bridgev2.Portal{Portal: &database.Portal{PortalKey: networkid.PortalKey{ID: "chat"}}}
+	m := graph.Message{}
+	m.Body.ContentType = "html"
+	m.Body.Content = `<img src="https://media.giphy.com/a.gif"><img src="../hostedContents/b/$value"><img src="../hostedContents/a/$value">`
+	gif := &bridgev2.ConvertedMessagePart{ID: "gif_0", Content: &event.MessageEventContent{MsgType: event.MsgImage, Body: "gif"}}
+	a := &bridgev2.ConvertedMessagePart{ID: "image_0", Content: &event.MessageEventContent{MsgType: event.MsgImage, Body: "a"}}
+	b := &bridgev2.ConvertedMessagePart{ID: "image_1", Content: &event.MessageEventContent{MsgType: event.MsgImage, Body: "b"}}
+	out := c.convertChatMessage(p, m)
+	out.Parts = append(out.Parts, gif, a, b)
+	c.orderImageParts(p, m, out, map[string]*bridgev2.ConvertedMessagePart{"a": a, "b": b})
+	if len(out.Parts) != 3 || out.Parts[0].Content.Body != "gif" || out.Parts[1].Content.Body != "b" || out.Parts[2].Content.Body != "a" {
+		t.Fatal("image-only HTML order changed")
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"teamsbridge.local/teamsbridge/internal/graph"
 	"testing"
+	"time"
 )
 
 func TestBackfillPaginationAndOrdering(t *testing.T) {
@@ -30,4 +31,10 @@ func TestBackfillPaginationAndOrdering(t *testing.T) {
 	if len(got.Messages) != 2 || got.Messages[0].ID != "chat/1" || !got.HasMore || !got.AggressiveDeduplication || !strings.Contains(string(got.Cursor), "skiptoken=next") {
 		t.Fatalf("bad backfill result: %+v", got)
 	}
+	p.AnchorMessage = &database.Message{Timestamp: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)}
+	empty, err := c.FetchMessages(context.Background(), p)
+	if err != nil || len(empty.Messages) != 0 || !empty.HasMore || empty.Cursor != got.Cursor {
+		t.Fatal("overlapping page must advance without emitting out-of-order messages", err)
+	}
+
 }

@@ -18,7 +18,7 @@ import (
 	"teamsbridge.local/teamsbridge/internal/graph"
 )
 
-const renderingRevision = 4
+const renderingRevision = 6
 
 func approvedGIFURL(raw string) bool {
 	u, err := url.Parse(raw)
@@ -189,6 +189,9 @@ func (c *Client) reactionDataWithMedia(ctx context.Context, p *bridgev2.Portal, 
 		}
 		mxc, err := c.customReactionImage(ctx, p, intent, m, r)
 		if err != nil {
+			if skippableMediaError(err) {
+				continue
+			}
 			return nil, err
 		}
 		key := customReactionID(r)

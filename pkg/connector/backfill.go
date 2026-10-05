@@ -61,6 +61,9 @@ func (c *Client) FetchMessages(ctx context.Context, p bridgev2.FetchMessagesPara
 		if m.ID == "" || m.Deleted != nil || m.From.User == nil || m.From.User.ID == "" || m.MessageType != "message" {
 			continue
 		}
+		if !p.Forward && p.AnchorMessage != nil && !m.Created.Before(p.AnchorMessage.Timestamp) {
+			continue
+		}
 		converted := c.convertChatMessage(p.Portal, m)
 		if hasImages(m) || len(m.Attachments) > 0 {
 			var err error

@@ -46,13 +46,10 @@ func (c *Client) convertMessage(ctx context.Context, p *bridgev2.Portal, intent 
 	out := c.convertChatMessage(p, m)
 	hostedParts := map[string]*bridgev2.ConvertedMessagePart{}
 	defer func() {
-		if len(out.Parts) > 1 && out.Parts[0].Content.Body == "[Teams message: open Teams to view this content]" {
-			out.Parts = out.Parts[1:]
-			out.Parts[0].ID = ""
-		}
-		c.captionImages(p, m, out, hostedParts)
+		c.orderImageParts(p, m, out, hostedParts)
 		stampMessage(out, original)
 	}()
+
 	if err := c.appendGIFs(ctx, p, intent, m, out); err != nil {
 		return nil, err
 	}
@@ -101,10 +98,6 @@ func (c *Client) convertMessage(ctx context.Context, p *bridgev2.Portal, intent 
 		hostedParts[item.ID] = part
 		out.Parts = append(out.Parts, part)
 	}
-	if len(out.Parts) > 1 && out.Parts[0].Content.Body == "[Teams message: open Teams to view this content]" {
-		out.Parts = out.Parts[1:]
-		out.Parts[0].ID = ""
-	}
 	return out, nil
 }
 
@@ -152,20 +145,40 @@ func hostedImageIDs(m graph.Message) map[string]bool {
 	return refs
 }
 
-// Matrix media captions keep prose attached to its image. For interleaved Teams
-// messages, follow the HTML order (the hostedContents listing is unordered).
-func (c *Client) captionImages(p *bridgev2.Portal, m graph.Message, out *bridgev2.ConvertedMessage, hosted map[string]*bridgev2.ConvertedMessagePart) {
-	if out.MergeCaption() {
+// Keep text on its original side of each image. Captions cannot do this:
+// Beeper always displays them below the image, even when Teams put text above it.
+func (c *Client) orderImageParts(p *bridgev2.Portal, m graph.Message, out *bridgev2.ConvertedMessage, hosted map[string]*bridgev2.ConvertedMessagePart) {
+	bySource := map[string]*bridgev2.ConvertedMessagePart{}
+	gifs := externalGIFs(m)
+	for i, src := range gifs {
+		for _, part := range out.Parts {
+			if part.ID == networkid.PartID(fmt.Sprintf("gif_%d", i)) {
+				bySource[src] = part
+			}
+		}
+	}
+	if len(hosted) == 0 && len(bySource) == 0 {
 		return
 	}
-	if len(hosted) < 2 || len(out.Parts) != len(hosted)+1 {
-		return
-	}
-	var captions []string
-	var images []*bridgev2.ConvertedMessagePart
+	var ordered []*bridgev2.ConvertedMessagePart
+	used := map[*bridgev2.ConvertedMessagePart]bool{}
 	var prose strings.Builder
+	first := true
+	flush := func() {
+		fragment := m
+		fragment.Body.Content = prose.String()
+		prose.Reset()
+		if !first {
+			fragment.Subject = ""
+			fragment.Attachments = nil
+		}
+		text := c.convertChatMessage(p, fragment).Parts[0]
+		first = false
+		if text.Content.Body != "[Teams message: open Teams to view this content]" {
+			ordered = append(ordered, text)
+		}
+	}
 	z := html.NewTokenizer(strings.NewReader(m.Body.Content))
-	seen := map[string]bool{}
 	for {
 		typ := z.Next()
 		if typ == html.ErrorToken {
@@ -173,48 +186,42 @@ func (c *Client) captionImages(p *bridgev2.Portal, m graph.Message, out *bridgev
 		}
 		raw := string(z.Raw())
 		tok := z.Token()
+		var media *bridgev2.ConvertedMessagePart
 		if (typ == html.StartTagToken || typ == html.SelfClosingTagToken) && tok.Data == "img" {
 			probe := m
 			probe.Body.Content = raw
-			refs := hostedImageIDs(probe)
-			if len(refs) != 1 {
-				return
+			for key := range hostedImageIDs(probe) {
+				media = hosted[key]
 			}
-			for key := range refs {
-				part := hosted[key]
-				if part == nil || seen[key] {
-					return
+			if media == nil {
+				for _, attr := range tok.Attr {
+					if attr.Key == "src" {
+						media = bySource[attr.Val]
+					}
 				}
-				seen[key] = true
-				images = append(images, part)
-				captions = append(captions, prose.String())
-				prose.Reset()
 			}
-		} else {
+		}
+		if media == nil {
 			prose.WriteString(raw)
+			continue
+		}
+		flush()
+		copy := *media
+		ordered = append(ordered, &copy)
+		used[media] = true
+	}
+	flush()
+	// Preserve non-image attachments and any media not represented inline.
+	for _, part := range out.Parts[1:] {
+		if !used[part] {
+			ordered = append(ordered, part)
 		}
 	}
-	if len(images) != len(hosted) {
-		return
-	}
-	captions[len(captions)-1] += prose.String()
-	for i, part := range images {
-		fragment := m
-		fragment.Body.Content = captions[i]
-		if i > 0 {
-			fragment.Subject = ""
-			fragment.Attachments = nil
-		}
-		text := c.convertChatMessage(p, fragment).Parts[0]
-		text.ID = part.ID
+	for i, part := range ordered {
+		part.ID = networkid.PartID(fmt.Sprintf("layout_%04d", i))
 		if i == 0 {
-			text.ID = ""
-		}
-		if text.Content.Body != "[Teams message: open Teams to view this content]" {
-			images[i] = bridgev2.MergeCaption(text, part)
-		} else {
-			part.ID = text.ID
+			part.ID = ""
 		}
 	}
-	out.Parts = images
+	out.Parts = ordered
 }
