@@ -49,7 +49,7 @@ func (c *Client) repairChatRendering(ctx context.Context, chat graph.Chat) error
 		return err
 	}
 	for _, m := range page.Value {
-		repair := hasImages(m)
+		repair := hasImages(m) || len(m.Attachments) > 0
 		for _, r := range m.Reactions {
 			repair = repair || r.Type == "custom"
 		}

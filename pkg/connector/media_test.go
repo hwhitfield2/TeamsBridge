@@ -3,6 +3,7 @@ package connector
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"image"
 	"image/png"
 	"net/http"
@@ -65,6 +66,25 @@ func TestHostedImageConversion(t *testing.T) {
 	if pic.MsgType != event.MsgImage || pic.Info.Width != 12 || pic.Info.Height != 7 || pic.File == nil || pic.File.URL != "mxc://test/encrypted" || pic.URL != "" {
 		t.Fatalf("incorrect encrypted image: %+v", pic)
 	}
+	// Forwarded images resolve under the forwarding message and retain the source
+	// hash, so subsequent polls do not repeatedly edit the imported message.
+	content, _ := json.Marshal(map[string]string{"originalMessageContent": m.Body.Content})
+	payload, _ := json.Marshal(map[string]any{"id": "msg", "body": map[string]string{"contentType": "html", "content": `<attachment id="forward"></attachment>`}, "attachments": []any{map[string]string{"id": "forward", "contentType": "forwardedMessageReference", "content": string(content)}}})
+	var forward graph.Message
+	if err := json.Unmarshal(payload, &forward); err != nil {
+		t.Fatal(err)
+	}
+	forwarded, err := c.convertMessage(context.Background(), p, intent, forward)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(forwarded.Parts) != 1 || forwarded.Parts[0].Content.File == nil || !strings.Contains(forwarded.Parts[0].Content.Body, "Screenshot") || strings.Contains(forwarded.Parts[0].Content.Body, "Attachment:") {
+		t.Fatalf("forward not rendered: %+v", forwarded)
+	}
+	if forwarded.Parts[0].DBMetadata.(*MessageMetadata).ContentHash != contentHash(forward) {
+		t.Fatal("forward lost original hash")
+	}
+
 }
 
 func TestUnsupportedHostedMediaDoesNotBlockHistory(t *testing.T) {

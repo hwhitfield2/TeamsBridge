@@ -81,7 +81,11 @@ func (c *Client) handleExisting(ctx context.Context, p *bridgev2.Portal, intent 
 	}
 	old, _ := parts[0].Metadata.(*MessageMetadata)
 	hash := contentHash(m)
-	repairMedia := hasImages(m) && (old == nil || old.RenderingRevision < renderingRevision)
+	revision := 0
+	if old != nil {
+		revision = old.RenderingRevision
+	}
+	repairMedia := (hasImages(m) && revision < 3) || (len(m.Attachments) > 0 && revision < 4)
 	if messagePartsMatch(parts, hash) && !repairMedia {
 		return result, nil
 	}

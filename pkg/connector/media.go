@@ -41,6 +41,8 @@ func hasImages(m graph.Message) bool {
 // Resolve hosted content through this message's Graph resource, never through
 // untrusted HTML URLs. UploadMedia handles encryption for the destination room.
 func (c *Client) convertMessage(ctx context.Context, p *bridgev2.Portal, intent bridgev2.MatrixAPI, m graph.Message) (*bridgev2.ConvertedMessage, error) {
+	original := m
+	m = expandForwardedMessages(m)
 	out := c.convertChatMessage(p, m)
 	hostedParts := map[string]*bridgev2.ConvertedMessagePart{}
 	defer func() {
@@ -49,7 +51,7 @@ func (c *Client) convertMessage(ctx context.Context, p *bridgev2.Portal, intent 
 			out.Parts[0].ID = ""
 		}
 		c.captionImages(p, m, out, hostedParts)
-		stampMessage(out, m)
+		stampMessage(out, original)
 	}()
 	if err := c.appendGIFs(ctx, p, intent, m, out); err != nil {
 		return nil, err

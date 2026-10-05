@@ -157,7 +157,11 @@ func convert(m graph.Message) *bridgev2.ConvertedMessage {
 			body += "\n" + renderCard(a.Content)
 			continue
 		}
-		body += "\n[Attachment: " + a.Name + "]"
+		name := strings.TrimSpace(a.Name)
+		if name == "" {
+			name = "Teams attachment — open Teams to view it"
+		}
+		body += "\n[Attachment: " + name + "]"
 		u, err := url.Parse(a.ContentURL)
 		if err == nil && u.Scheme == "https" && u.Host != "" {
 			body += " " + u.String()
