@@ -102,7 +102,7 @@ func (c *Client) appendFiles(ctx context.Context, p *bridgev2.Portal, intent bri
 		}
 		item, data, err := c.downloadFile(ctx, a.ContentURL)
 		if err != nil {
-			out.Parts[0].Content.Body += "\n[File download unavailable; use the attachment link]"
+			appendPlain(out.Parts[0].Content, "\n[File download unavailable; use the attachment link]")
 			continue
 		}
 		name := filepath.Base(item.Name)

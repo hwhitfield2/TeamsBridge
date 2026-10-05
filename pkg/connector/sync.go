@@ -146,9 +146,12 @@ func (c *Client) syncChat(ctx context.Context, chat graph.Chat) error {
 }
 func convert(m graph.Message) *bridgev2.ConvertedMessage {
 	body := m.Body.Content
+	formatted := ""
 	if strings.EqualFold(m.Body.ContentType, "html") {
-		body = format.HTMLToText(body)
+		formatted = matrixHTML(body)
+		body = format.HTMLToText(formatted)
 	}
+	baseBody := body
 	for _, a := range m.Attachments {
 		if a.ContentType == "messageReference" {
 			continue
@@ -170,5 +173,10 @@ func convert(m graph.Message) *bridgev2.ConvertedMessage {
 	if strings.TrimSpace(body) == "" {
 		body = "[Teams message: open Teams to view this content]"
 	}
-	return &bridgev2.ConvertedMessage{Parts: []*bridgev2.ConvertedMessagePart{{Type: event.EventMessage, Content: &event.MessageEventContent{MsgType: event.MsgText, Body: body}}}}
+	content := &event.MessageEventContent{MsgType: event.MsgText, Body: body}
+	if formatted != "" {
+		content.Format = event.FormatHTML
+		content.FormattedBody = formatted + plainHTML(strings.TrimPrefix(body, baseBody))
+	}
+	return &bridgev2.ConvertedMessage{Parts: []*bridgev2.ConvertedMessagePart{{Type: event.EventMessage, Content: content}}}
 }

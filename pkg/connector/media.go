@@ -66,7 +66,7 @@ func (c *Client) convertMessage(ctx context.Context, p *bridgev2.Portal, intent 
 	}](ctx, c.api, path)
 	if err != nil {
 		if skippableMediaError(err) {
-			out.Parts[0].Content.Body += "\n[Teams images unavailable: access denied or content removed — open Teams to view them]"
+			appendPlain(out.Parts[0].Content, "\n[Teams images unavailable: access denied or content removed — open Teams to view them]")
 			return out, nil
 		}
 		return nil, fmt.Errorf("list Teams images: %w", err)
@@ -78,14 +78,14 @@ func (c *Client) convertMessage(ctx context.Context, p *bridgev2.Portal, intent 
 		var data []byte
 		if err = c.api.Do(ctx, "GET", path+"/"+url.PathEscape(item.ID)+"/$value", nil, &data); err != nil {
 			if skippableMediaError(err) {
-				out.Parts[0].Content.Body += "\n[Teams media unavailable or unsupported — open Teams to view it]"
+				appendPlain(out.Parts[0].Content, "\n[Teams media unavailable or unsupported — open Teams to view it]")
 				continue
 			}
 			return nil, fmt.Errorf("download Teams image: %w", err)
 		}
 		dimensions, kind, err := image.DecodeConfig(bytes.NewReader(data))
 		if err != nil {
-			out.Parts[0].Content.Body += "\n[Teams image could not be decoded — open Teams to view it]"
+			appendPlain(out.Parts[0].Content, "\n[Teams image could not be decoded — open Teams to view it]")
 			continue
 		}
 		filename := fmt.Sprintf("teams-image-%d.%s", i+1, kind)

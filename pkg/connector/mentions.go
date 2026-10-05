@@ -92,7 +92,10 @@ func applyMentions(content *event.MessageEventContent, refs []inboundMention) {
 	if len(refs) == 0 {
 		return
 	}
-	formatted := stdhtml.EscapeString(content.Body)
+	formatted := plainHTML(content.Body)
+	if content.Format == event.FormatHTML {
+		formatted = content.FormattedBody
+	}
 	content.Mentions = &event.Mentions{}
 	for _, r := range refs {
 		label := "@" + strings.TrimPrefix(r.label, "@")
@@ -108,7 +111,7 @@ func applyMentions(content *event.MessageEventContent, refs []inboundMention) {
 		content.Body = strings.ReplaceAll(content.Body, r.marker, label)
 	}
 	content.Format = event.FormatHTML
-	content.FormattedBody = strings.ReplaceAll(formatted, "\n", "<br>")
+	content.FormattedBody = formatted
 }
 
 func outgoingMentions(content *event.MessageEventContent, resolve func(id.UserID) (string, error), implicitReply ...id.UserID) (string, []graph.Mention, error) {

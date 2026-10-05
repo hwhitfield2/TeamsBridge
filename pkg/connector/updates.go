@@ -86,10 +86,11 @@ func (c *Client) handleExisting(ctx context.Context, p *bridgev2.Portal, intent 
 	old, _ := parts[0].Metadata.(*MessageMetadata)
 	hash := contentHash(m)
 
-	if messagePartsMatch(parts, hash) {
+	repairHTML := needsBotHTMLRepair(parts, m)
+	if messagePartsMatch(parts, hash) && !repairHTML {
 		return result, nil
 	}
-	if (old == nil || old.ContentHash == "") && m.Edited == nil {
+	if (old == nil || old.ContentHash == "") && m.Edited == nil && !repairHTML {
 		for _, part := range parts {
 			part.Metadata = &MessageMetadata{ContentHash: hash, PartCount: len(parts)}
 		}
@@ -143,7 +144,7 @@ func (c *Client) queueMessage(ctx context.Context, portal string, m graph.Messag
 		}
 		delivered := m.Deleted != nil && len(rows) == 0
 		if m.Deleted == nil {
-			delivered = messagePartsMatch(rows, contentHash(m))
+			delivered = messagePartsMatch(rows, contentHash(m)) && !needsBotHTMLRepair(rows, m)
 		}
 
 		if !delivered {

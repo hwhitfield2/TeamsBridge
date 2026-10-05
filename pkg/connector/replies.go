@@ -8,6 +8,7 @@ import (
 
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
+	"maunium.net/go/mautrix/event"
 	"teamsbridge.local/teamsbridge/internal/graph"
 )
 
@@ -42,10 +43,16 @@ func (c *Client) convertChatMessage(p *bridgev2.Portal, m graph.Message) *bridge
 		// Keep a readable quote when the original has not yet been backfilled,
 		// and preserve additional references (Matrix supports one reply target).
 		if ref.MessagePreview != "" {
+			if out.Parts[0].Content.Format == event.FormatHTML {
+				out.Parts[0].Content.FormattedBody = "<blockquote>" + plainHTML(ref.MessagePreview) + "</blockquote>" + out.Parts[0].Content.FormattedBody
+			}
 			out.Parts[0].Content.Body = "> " + strings.ReplaceAll(ref.MessagePreview, "\n", "\n> ") + "\n\n" + out.Parts[0].Content.Body
 		}
 	}
 	if m.Subject != "" {
+		if out.Parts[0].Content.Format == event.FormatHTML {
+			out.Parts[0].Content.FormattedBody = "<p>" + plainHTML(m.Subject) + "</p>" + out.Parts[0].Content.FormattedBody
+		}
 		out.Parts[0].Content.Body = m.Subject + "\n\n" + out.Parts[0].Content.Body
 	}
 	if _, ok := channelPath(string(p.ID)); ok && m.ReplyToID != "" {
