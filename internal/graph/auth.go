@@ -31,6 +31,7 @@ func (o OAuth) Validate() error {
 }
 
 type Token struct {
+	Scope     string    `json:"scope,omitempty"`
 	Access    string    `json:"access_token"`
 	Refresh   string    `json:"refresh_token"`
 	ExpiresIn int       `json:"expires_in"`

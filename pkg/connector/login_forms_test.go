@@ -56,3 +56,20 @@ func TestSavedSecretCannotCrossApps(t *testing.T) {
 		t.Fatal("saved secret sent to another registration")
 	}
 }
+
+func TestExtendedPermissionProfiles(t *testing.T) {
+	for _, profile := range []string{"extended", "files", "channels"} {
+		scopes := LoginSettings{Profile: profile}.oauth().Scopes()
+		for _, required := range []string{"Chat.ReadWrite", "Chat.Create", "User.ReadBasic.All"} {
+			if !strings.Contains(scopes, required) {
+				t.Fatal(profile, required)
+			}
+		}
+		if strings.Contains(scopes, "Files.ReadWrite") != (profile != "extended") {
+			t.Fatal(profile, scopes)
+		}
+		if strings.Contains(scopes, "ChannelMessage.ReadWrite") != (profile == "channels") {
+			t.Fatal(profile, scopes)
+		}
+	}
+}

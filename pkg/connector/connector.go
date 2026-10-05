@@ -8,6 +8,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"os"
+	"strings"
 	"sync"
 	"teamsbridge.local/teamsbridge/internal/graph"
 	"time"
@@ -35,11 +36,13 @@ type Connector struct {
 	Config Config
 }
 type Metadata struct {
-	mu      sync.Mutex
-	Auth    *LoginSettings       `json:"auth,omitempty"`
-	Token   graph.Token          `json:"token"`
-	UserID  string               `json:"user_id"`
-	Cursors map[string]time.Time `json:"cursors"`
+	Media             map[string]string `json:"media,omitempty"`
+	RenderingRevision int               `json:"rendering_revision,omitempty"`
+	mu                sync.Mutex
+	Auth              *LoginSettings       `json:"auth,omitempty"`
+	Token             graph.Token          `json:"token"`
+	UserID            string               `json:"user_id"`
+	Cursors           map[string]time.Time `json:"cursors"`
 }
 
 var _ bridgev2.NetworkConnector = (*Connector)(nil)
@@ -74,12 +77,12 @@ func (c *Connector) GetConfig() (string, any, up.Upgrader) {
 	})
 }
 func (c *Connector) GetDBMetaTypes() database.MetaTypes {
-	return database.MetaTypes{UserLogin: func() any { return &Metadata{} }}
+	return database.MetaTypes{Message: func() any { return &MessageMetadata{} }, UserLogin: func() any { return &Metadata{} }}
 }
 func (c *Connector) GetCapabilities() *bridgev2.NetworkGeneralCapabilities {
-	return &bridgev2.NetworkGeneralCapabilities{}
+	return &bridgev2.NetworkGeneralCapabilities{Provisioning: bridgev2.ProvisioningCapabilities{ResolveIdentifier: bridgev2.ResolveIdentifierCapabilities{CreateDM: true, LookupEmail: true, LookupUsername: true}, GroupCreation: map[string]bridgev2.GroupTypeCapabilities{"group": {TypeDescription: "Teams group chat", Name: bridgev2.GroupFieldCapability{Allowed: true}, Participants: bridgev2.GroupFieldCapability{Allowed: true, Required: true, MinLength: 1, MaxLength: 249}}}}}
 }
-func (c *Connector) GetBridgeInfoVersion() (int, int) { return 3, 5 }
+func (c *Connector) GetBridgeInfoVersion() (int, int) { return 3, 6 }
 func (c *Connector) LoadUserLogin(ctx context.Context, l *bridgev2.UserLogin) error {
 	m, ok := l.Metadata.(*Metadata)
 	if !ok {
@@ -94,6 +97,9 @@ func (c *Connector) LoadUserLogin(ctx context.Context, l *bridgev2.UserLogin) er
 func (c *Connector) GetLoginFlows() []bridgev2.LoginFlow {
 	return []bridgev2.LoginFlow{
 		{ID: "work_browser", Name: "Messaging — browser", Description: "Chat.Read and ChatMessage.Send. Profile photos are not requested."},
+		{ID: "work_extended", Name: "Chat management", Description: "Chat.ReadWrite, Chat.Create and User.ReadBasic.All for edits, deletion, reactions, read state and new chats."},
+		{ID: "work_files", Name: "Chat management and files", Description: "Also requests Files.ReadWrite for OneDrive uploads and attachment downloads."},
+		{ID: "work_channels", Name: "Chat and channel management with files", Description: "Also requests Channel.ReadBasic.All, ChannelMessage.Read.All, ChannelMessage.Send, ChannelMessage.ReadWrite and Files.ReadWrite.All."},
 		{ID: "work_photos", Name: "Messaging and profile photos", Description: "Also requires approved User.ReadBasic.All."},
 		{ID: "work_readonly", Name: "Read-only chats", Description: "Requires Chat.Read, without sending permission."},
 		{ID: "work_device_code", Name: "Messaging — device code", Description: "Public-client registration; your organization must allow device-code sign-in."},
@@ -103,6 +109,8 @@ func (c *Connector) CreateLogin(ctx context.Context, u *bridgev2.User, flow stri
 	profile := "messaging"
 	switch flow {
 	case "work_browser", "work_device_code":
+	case "work_extended", "work_files", "work_channels":
+		profile = strings.TrimPrefix(flow, "work_")
 	case "work_photos":
 		profile = "photos"
 	case "work_readonly":

@@ -7,6 +7,7 @@ import (
 	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"maunium.net/go/mautrix/bridgev2"
@@ -47,7 +48,7 @@ func TestHostedImageConversion(t *testing.T) {
 	c := &Client{api: &graph.Client{Base: server.URL + "/v1.0", HTTP: server.Client(), Token: func(context.Context) (string, error) { return "test", nil }}}
 	m := graph.Message{ID: "msg"}
 	m.Body.ContentType = "html"
-	m.Body.Content = `<p>Screenshot</p><img src="https://untrusted.example/image">`
+	m.Body.Content = `<p>Screenshot</p><img src="../hostedContents/image/$value">`
 	intent := &mediaIntent{}
 	p := &bridgev2.Portal{Portal: &database.Portal{PortalKey: networkid.PortalKey{ID: "chat"}, MXID: "!room:test"}}
 	got, err := c.convertMessage(context.Background(), p, intent, m)
@@ -60,5 +61,28 @@ func TestHostedImageConversion(t *testing.T) {
 	pic := got.Parts[1].Content
 	if pic.MsgType != event.MsgImage || pic.Info.Width != 12 || pic.Info.Height != 7 || pic.File == nil || pic.File.URL != "mxc://test/encrypted" || pic.URL != "" {
 		t.Fatalf("incorrect encrypted image: %+v", pic)
+	}
+}
+
+func TestUnsupportedHostedMediaDoesNotBlockHistory(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/hostedContents") {
+			w.Write([]byte(`{"value":[{"id":"unsupported"}]}`))
+		} else {
+			w.Write([]byte("not an image"))
+		}
+	}))
+	defer server.Close()
+	c := &Client{api: &graph.Client{Base: server.URL + "/v1.0", HTTP: server.Client(), Token: func(context.Context) (string, error) { return "test", nil }}}
+	m := graph.Message{ID: "m"}
+	m.Body.ContentType = "html"
+	m.Body.Content = `<img src="../hostedContents/unsupported/$value">`
+	p := &bridgev2.Portal{Portal: &database.Portal{PortalKey: networkid.PortalKey{ID: "chat"}}}
+	out, err := c.convertMessage(context.Background(), p, &mediaIntent{}, m)
+	if err != nil || len(out.Parts) != 1 || !strings.Contains(out.Parts[0].Content.Body, "open Teams") {
+		t.Fatal(out, err)
+	}
+	if skippableMediaError(&graph.APIError{Status: 429}) {
+		t.Fatal("throttled media must retry")
 	}
 }

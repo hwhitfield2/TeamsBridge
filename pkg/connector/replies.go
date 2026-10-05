@@ -12,6 +12,7 @@ import (
 )
 
 func (c *Client) convertChatMessage(p *bridgev2.Portal, m graph.Message) *bridgev2.ConvertedMessage {
+	original := m
 	m, mentions := c.prepareMentions(m)
 	out := convert(m)
 	for _, a := range m.Attachments {
@@ -54,6 +55,7 @@ func (c *Client) convertChatMessage(p *bridgev2.Portal, m graph.Message) *bridge
 		out.ReplyToRoom = p.PortalKey
 	}
 	applyMentions(out.Parts[0].Content, mentions)
+	stampMessage(out, original)
 	return out
 }
 

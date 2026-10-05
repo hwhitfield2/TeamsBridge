@@ -7,6 +7,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"net/url"
+	"strings"
 	"teamsbridge.local/teamsbridge/internal/graph"
 	"time"
 )
@@ -19,10 +20,20 @@ type profileCacheEntry struct {
 
 func (c *Client) profile(ctx context.Context, user, name string) *bridgev2.UserInfo {
 	info := &bridgev2.UserInfo{}
+	if strings.HasPrefix(user, "app-") {
+		if cached, ok := c.appNames.Load(user); ok {
+			name = cached.(string)
+		}
+		if name == "" {
+			name = "Teams app"
+		}
+		info.Name = &name
+		return info
+	}
 	if name != "" {
 		info.Name = &name
 	}
-	if (c.meta != nil && c.meta.Auth != nil && c.meta.Auth.Profile != "photos") || (c.main != nil && !c.main.Config.ProfilePhotos && (c.meta == nil || c.meta.Auth == nil)) {
+	if (c.meta != nil && c.meta.Auth != nil && c.meta.Auth.Profile != "photos" && c.meta.Auth.Profile != "extended" && c.meta.Auth.Profile != "files" && c.meta.Auth.Profile != "channels") || (c.main != nil && !c.main.Config.ProfilePhotos && (c.meta == nil || c.meta.Auth == nil)) {
 		return info
 	}
 	c.profileMu.Lock()

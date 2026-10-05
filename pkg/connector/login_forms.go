@@ -23,8 +23,17 @@ func (s LoginSettings) oauth() graph.OAuth {
 	if s.Profile != "readonly" {
 		scopes += " ChatMessage.Send"
 	}
-	if s.Profile == "photos" {
+	if s.Profile == "photos" || s.Profile == "extended" || s.Profile == "files" || s.Profile == "channels" {
 		scopes += " User.ReadBasic.All"
+	}
+	if s.Profile == "extended" || s.Profile == "files" || s.Profile == "channels" {
+		scopes += " Chat.ReadWrite Chat.Create"
+	}
+	if s.Profile == "files" {
+		scopes += " Files.ReadWrite"
+	}
+	if s.Profile == "channels" {
+		scopes += " Channel.ReadBasic.All ChannelMessage.Read.All ChannelMessage.Send ChannelMessage.ReadWrite Files.ReadWrite.All"
 	}
 	return graph.OAuth{ClientID: s.ClientID, TenantID: s.TenantID, SecretFile: s.SecretFile, RequestedScopes: scopes}
 }

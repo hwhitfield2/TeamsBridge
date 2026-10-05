@@ -9,6 +9,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/status"
 	"maunium.net/go/mautrix/event"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,7 +18,11 @@ import (
 )
 
 type Client struct {
+	mediaMu       sync.Mutex
+	fileHTTP      *http.Client
 	chatSync      sync.Map
+	receipts      sync.Map
+	appNames      sync.Map
 	memberUpdated sync.Map
 	recentSeen    map[string]recentStamp
 	main          *Connector
@@ -97,11 +102,33 @@ func (c *Client) IsThisUser(ctx context.Context, id networkid.UserID) bool {
 	return string(id) == c.meta.UserID
 }
 func (c *Client) GetCapabilities(ctx context.Context, p *bridgev2.Portal) *event.RoomFeatures {
-	features := &event.RoomFeatures{ID: "teamswork.media.v5", File: event.FileFeatureMap{event.CapMsgGIF: {MimeTypes: map[string]event.CapabilitySupportLevel{"image/gif": event.CapLevelFullySupported, "video/mp4": event.CapLevelPartialSupport}, MaxSize: maxHostedImage, Caption: event.CapLevelFullySupported}, event.CapabilityMsgType(event.MsgImage): {MimeTypes: map[string]event.CapabilitySupportLevel{"image/gif": event.CapLevelFullySupported, "image/png": event.CapLevelFullySupported, "image/jpeg": event.CapLevelFullySupported}, MaxSize: maxHostedImage, Caption: event.CapLevelFullySupported}}, Reply: event.CapLevelFullySupported, Formatting: event.FormattingFeatureMap{event.FmtUserLink: event.CapLevelFullySupported}}
+	features := &event.RoomFeatures{File: event.FileFeatureMap{event.CapMsgGIF: {MimeTypes: map[string]event.CapabilitySupportLevel{"image/gif": event.CapLevelFullySupported, "video/mp4": event.CapLevelPartialSupport}, MaxSize: maxHostedImage, Caption: event.CapLevelFullySupported}, event.CapabilityMsgType(event.MsgImage): {MimeTypes: map[string]event.CapabilitySupportLevel{"image/gif": event.CapLevelFullySupported, "image/png": event.CapLevelFullySupported, "image/jpeg": event.CapLevelFullySupported}, MaxSize: maxHostedImage, Caption: event.CapLevelFullySupported}}, Reply: event.CapLevelFullySupported, Formatting: event.FormattingFeatureMap{event.FmtUserLink: event.CapLevelFullySupported}}
 	if p != nil {
 		if _, ok := channelPath(string(p.ID)); ok {
 			features.Thread = event.CapLevelFullySupported
-			features.ID += ".channel"
+
+		}
+	}
+	channel := false
+	if p != nil {
+		_, channel = channelPath(string(p.ID))
+	}
+	write := c.meta != nil && (c.meta.Auth == nil || c.meta.Auth.Profile != "readonly")
+	if write && ((!channel && c.hasScope("Chat.ReadWrite")) || (channel && c.hasScope("ChannelMessage.ReadWrite"))) {
+		features.Edit = event.CapLevelPartialSupport
+		features.Delete = event.CapLevelFullySupported
+	}
+	if write && ((!channel && (c.hasScope("ChatMessage.Send") || c.hasScope("Chat.ReadWrite"))) || (channel && c.hasScope("ChannelMessage.Send"))) {
+		features.Reaction = event.CapLevelFullySupported
+	}
+	// This means personal read-state sync, not other participants' seen receipts.
+	if write && channel && c.hasScope("ChannelMessage.Edit") {
+		features.Edit = event.CapLevelPartialSupport
+	}
+	features.ReadReceipts = !channel && write && c.hasScope("Chat.ReadWrite")
+	if write && (c.hasScope("Files.ReadWrite.All") || (!channel && c.hasScope("Files.ReadWrite"))) {
+		for _, kind := range []event.MessageType{event.MsgFile, event.MsgVideo, event.MsgAudio} {
+			features.File[event.CapabilityMsgType(kind)] = &event.FileFeatures{MimeTypes: map[string]event.CapabilitySupportLevel{"*/*": event.CapLevelFullySupported}, MaxSize: maxFileSize, Caption: event.CapLevelFullySupported}
 		}
 	}
 	return features
@@ -166,7 +193,7 @@ func (c *Client) GetChatInfo(ctx context.Context, p *bridgev2.Portal) (*bridgev2
 }
 func messageID(chat, id string) networkid.MessageID { return networkid.MessageID(chat + "/" + id) }
 func (c *Client) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMessage) (*bridgev2.MatrixMessageResponse, error) {
-	if msg == nil || msg.Content == nil || (msg.Content.MsgType != event.MsgText && msg.Content.MsgType != event.MsgImage && msg.Content.MsgType != event.MsgFile && msg.Content.MsgType != event.MsgVideo) {
+	if msg == nil || msg.Content == nil || (msg.Content.MsgType != event.MsgText && msg.Content.MsgType != event.MsgImage && msg.Content.MsgType != event.MsgFile && msg.Content.MsgType != event.MsgVideo && msg.Content.MsgType != event.MsgAudio) {
 		return nil, bridgev2.ErrUnsupportedMessageType
 	}
 	if c.meta.Auth != nil && c.meta.Auth.Profile == "readonly" {
@@ -179,7 +206,11 @@ func (c *Client) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMe
 	var payload any
 	var err error
 	if msg.Content.MsgType != event.MsgText {
-		payload, path, err = c.outgoingMedia(ctx, msg)
+		if isInlineMedia(msg.Content) {
+			payload, path, err = c.outgoingMedia(ctx, msg)
+		} else {
+			payload, path, err = c.outgoingFile(ctx, msg)
+		}
 	} else {
 		path, payload, err = outgoingChatMessage(msg)
 		if err == nil {
@@ -195,7 +226,11 @@ func (c *Client) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMe
 	if out.ID == "" {
 		return nil, errors.New("Teams returned a message without an ID; check Teams before retrying")
 	}
-	return &bridgev2.MatrixMessageResponse{DB: &database.Message{ID: messageID(chat, out.ID), SenderID: networkid.UserID(c.meta.UserID), Timestamp: out.Created}}, nil
+	db := &database.Message{ID: messageID(chat, out.ID), SenderID: networkid.UserID(c.meta.UserID), Timestamp: out.Created}
+	if _, ok := channelPath(chat); ok && out.ReplyToID != "" {
+		db.ThreadRoot = messageID(chat, out.ReplyToID)
+	}
+	return &bridgev2.MatrixMessageResponse{DB: db}, nil
 }
 func (c *Client) loop(ctx context.Context) {
 	channelDone := make(chan struct{})

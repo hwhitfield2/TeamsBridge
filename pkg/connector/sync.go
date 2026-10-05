@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/simplevent"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/format"
@@ -40,7 +39,7 @@ func (c *Client) sync(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if chat.ChatType != "oneOnOne" && chat.ChatType != "group" {
+		if !supportedChatType(chat.ChatType) {
 			continue
 		}
 		if err = c.syncChat(ctx, chat); err != nil {
@@ -122,46 +121,9 @@ func (c *Client) syncChat(ctx context.Context, chat graph.Chat) error {
 		if m.Created.After(next) {
 			next = m.Created
 		}
-		if m.ID == "" || m.Deleted != nil || m.From.User == nil || m.From.User.ID == "" || m.MessageType != "message" {
-			continue
-		}
-		id := messageID(chat.ID, m.ID)
-		existing, err := c.main.Bridge.DB.Message.GetLastPartByID(ctx, c.login.ID, id)
-		if err != nil {
+		if err := c.queueMessage(ctx, chat.ID, m, true); err != nil {
 			return err
 		}
-		if existing != nil {
-			continue
-		}
-		evt := &simplevent.Message[graph.Message]{EventMeta: simplevent.EventMeta{Type: bridgev2.RemoteEventMessage, PortalKey: c.key(chat.ID), CreatePortal: true, Sender: c.sender(m.From.User.ID), Timestamp: m.Created, StreamOrder: m.Created.UnixMilli()}, ID: id, Data: m, ConvertMessageFunc: c.convertMessage, HandleExistingFunc: func(context.Context, *bridgev2.Portal, bridgev2.MatrixAPI, []*database.Message, graph.Message) (bridgev2.UpsertResult, error) {
-			return bridgev2.UpsertResult{}, nil
-		}}
-		if !c.login.QueueRemoteEvent(evt).Success {
-			return fmt.Errorf("could not queue Teams message")
-		}
-		// Only advance the cursor after bridgev2 has persisted delivery. On errors,
-		// replay is safe because the durable message mapping is the deduplication key.
-		waitCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
-		ticker := time.NewTicker(100 * time.Millisecond)
-		delivered := false
-		for !delivered {
-			select {
-			case <-waitCtx.Done():
-				ticker.Stop()
-				cancel()
-				return fmt.Errorf("waiting for Matrix delivery: %w", waitCtx.Err())
-			case <-ticker.C:
-				row, e := c.main.Bridge.DB.Message.GetLastPartByID(waitCtx, c.login.ID, id)
-				if e != nil {
-					ticker.Stop()
-					cancel()
-					return e
-				}
-				delivered = row != nil
-			}
-		}
-		ticker.Stop()
-		cancel()
 	}
 	if next.IsZero() {
 		next = time.Now().Add(-2 * time.Minute)
@@ -189,6 +151,10 @@ func convert(m graph.Message) *bridgev2.ConvertedMessage {
 	}
 	for _, a := range m.Attachments {
 		if a.ContentType == "messageReference" {
+			continue
+		}
+		if strings.Contains(a.ContentType, "card") {
+			body += "\n" + renderCard(a.Content)
 			continue
 		}
 		body += "\n[Attachment: " + a.Name + "]"

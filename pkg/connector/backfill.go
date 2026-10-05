@@ -57,18 +57,30 @@ func (c *Client) FetchMessages(ctx context.Context, p bridgev2.FetchMessagesPara
 	}
 	out := &bridgev2.FetchMessagesResponse{Cursor: networkid.PaginationCursor(page.Next), HasMore: page.Next != "", Forward: p.Forward, MarkRead: true, AggressiveDeduplication: true}
 	for _, m := range page.Value {
+		m = c.normalizeSender(m)
 		if m.ID == "" || m.Deleted != nil || m.From.User == nil || m.From.User.ID == "" || m.MessageType != "message" {
 			continue
 		}
 		converted := c.convertChatMessage(p.Portal, m)
-		if hasImages(m) {
+		if hasImages(m) || len(m.Attachments) > 0 {
 			var err error
 			converted, err = c.convertMessage(ctx, p.Portal, c.main.Bridge.Bot, m)
 			if err != nil {
 				return nil, err
 			}
 		}
-		out.Messages = append(out.Messages, &bridgev2.BackfillMessage{ConvertedMessage: converted, Sender: c.sender(m.From.User.ID), ID: messageID(string(p.Portal.ID), m.ID), Timestamp: m.Created, StreamOrder: m.Created.UnixMilli()})
+		reactions := c.reactionData(m)
+		for _, reaction := range m.Reactions {
+			if reaction.Type == "custom" {
+				var err error
+				reactions, err = c.reactionDataWithMedia(ctx, p.Portal, c.main.Bridge.Bot, m)
+				if err != nil {
+					return nil, err
+				}
+				break
+			}
+		}
+		out.Messages = append(out.Messages, &bridgev2.BackfillMessage{ConvertedMessage: converted, Reactions: reactions.ToBackfill(), Sender: c.sender(m.From.User.ID), ID: messageID(string(p.Portal.ID), m.ID), Timestamp: m.Created, StreamOrder: m.Created.UnixMilli()})
 	}
 	sort.SliceStable(out.Messages, func(i, j int) bool { return out.Messages[i].Timestamp.Before(out.Messages[j].Timestamp) })
 	return out, nil

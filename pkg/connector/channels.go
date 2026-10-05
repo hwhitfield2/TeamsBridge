@@ -103,22 +103,8 @@ func (c *Client) syncChannel(ctx context.Context, cfg ChannelConfig) error {
 		return err
 	}
 	for _, m := range messages {
-		if m.ID == "" || m.Deleted != nil || m.From.User == nil || m.From.User.ID == "" || m.MessageType != "message" {
-			continue
-		}
-		mid := messageID(portal, m.ID)
-		old, err := c.main.Bridge.DB.Message.GetLastPartByID(ctx, c.login.ID, mid)
-		if err != nil {
+		if err := c.queueMessage(ctx, portal, m, true); err != nil {
 			return err
-		}
-		if old != nil {
-			continue
-		}
-		evt := &simplevent.Message[graph.Message]{EventMeta: simplevent.EventMeta{Type: bridgev2.RemoteEventMessage, PortalKey: c.key(portal), CreatePortal: true, Sender: c.sender(m.From.User.ID), Timestamp: m.Created, StreamOrder: m.Created.UnixMilli()}, ID: mid, Data: m, ConvertMessageFunc: c.convertMessage, HandleExistingFunc: func(context.Context, *bridgev2.Portal, bridgev2.MatrixAPI, []*database.Message, graph.Message) (bridgev2.UpsertResult, error) {
-			return bridgev2.UpsertResult{}, nil
-		}}
-		if !c.login.QueueRemoteEvent(evt).Success {
-			return fmt.Errorf("could not queue channel message")
 		}
 	}
 	return nil

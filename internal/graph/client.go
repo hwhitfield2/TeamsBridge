@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,8 +14,13 @@ import (
 	"time"
 )
 
+var ErrUnsupportedImage = errors.New("unsupported photo format")
+var ErrImageTooLarge = errors.New("image exceeds 20 MiB")
+
 const BaseURL = "https://graph.microsoft.com/v1.0"
 const Scopes = "offline_access User.Read User.ReadBasic.All Chat.Read ChatMessage.Send"
+
+type RawBody []byte
 
 type Client struct {
 	HTTP  *http.Client
@@ -57,7 +63,11 @@ func (c *Client) Do(ctx context.Context, method, path string, body, out any) err
 	}
 	var data []byte
 	if body != nil {
-		data, err = json.Marshal(body)
+		if raw, ok := body.(RawBody); ok {
+			data = raw
+		} else {
+			data, err = json.Marshal(body)
+		}
 		if err != nil {
 			return err
 		}
@@ -72,6 +82,9 @@ func (c *Client) Do(ctx context.Context, method, path string, body, out any) err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
+	if _, ok := body.(RawBody); ok {
+		req.Header.Set("Content-Type", "application/octet-stream")
+	}
 	hc := c.HTTP
 	if hc == nil {
 		hc = HTTPClient()
@@ -101,11 +114,11 @@ func (c *Client) Do(ctx context.Context, method, path string, body, out any) err
 			return err
 		}
 		if len(data) > 20<<20 {
-			return fmt.Errorf("image exceeds 20 MiB")
+			return ErrImageTooLarge
 		}
 		kind := http.DetectContentType(data)
 		if kind != "image/jpeg" && kind != "image/png" && kind != "image/gif" {
-			return fmt.Errorf("unsupported photo format")
+			return ErrUnsupportedImage
 		}
 		*target = data
 		return nil
@@ -142,6 +155,9 @@ type Member struct {
 	DisplayName string `json:"displayName"`
 }
 type Chat struct {
+	Viewpoint *struct {
+		LastRead time.Time `json:"lastMessageReadDateTime"`
+	} `json:"viewpoint"`
 	LastMessage *Message `json:"lastMessagePreview"`
 	ID          string   `json:"id"`
 	Topic       string   `json:"topic"`
@@ -159,7 +175,18 @@ type Mention struct {
 		} `json:"conversation,omitempty"`
 	} `json:"mentioned"`
 }
+type Reaction struct {
+	DisplayName string    `json:"displayName"`
+	ContentURL  string    `json:"reactionContentUrl"`
+	Type        string    `json:"reactionType"`
+	Created     time.Time `json:"createdDateTime"`
+	User        struct {
+		User *User `json:"user"`
+	} `json:"user"`
+}
 type Message struct {
+	Edited      *time.Time `json:"lastEditedDateTime"`
+	Reactions   []Reaction `json:"reactions"`
 	ReplyToID   string     `json:"replyToId"`
 	Subject     string     `json:"subject"`
 	Replies     []Message  `json:"replies"`
@@ -175,7 +202,8 @@ type Message struct {
 		Content     string `json:"content"`
 	} `json:"body"`
 	From struct {
-		User *User `json:"user"`
+		User        *User `json:"user"`
+		Application *User `json:"application"`
 	} `json:"from"`
 	Attachments []struct {
 		ID          string `json:"id"`
