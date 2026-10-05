@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"image"
 	"io"
@@ -73,17 +74,20 @@ func (c *Client) downloadGIF(ctx context.Context, raw string) ([]byte, error) {
 	}
 	defer response.Body.Close()
 	if response.StatusCode != 200 {
-		return nil, fmt.Errorf("GIF download HTTP %d", response.StatusCode)
+		return nil, &graph.APIError{Status: response.StatusCode, Code: "GIF download unavailable"}
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxFileSize+1))
 	if err != nil {
 		return nil, err
 	}
 	if len(data) > maxFileSize {
-		return nil, fmt.Errorf("GIF exceeds 20 MB")
+		return nil, graph.ErrImageTooLarge
 	}
 	if http.DetectContentType(data) != "image/gif" {
-		return nil, fmt.Errorf("GIF provider returned an unsupported format")
+		return nil, graph.ErrUnsupportedImage
+	}
+	if _, _, err := image.DecodeConfig(bytes.NewReader(data)); err != nil {
+		return nil, graph.ErrUnsupportedImage
 	}
 	return data, nil
 }
@@ -91,6 +95,10 @@ func (c *Client) appendGIFs(ctx context.Context, p *bridgev2.Portal, intent brid
 	for i, src := range externalGIFs(m) {
 		data, err := c.downloadGIF(ctx, src)
 		if err != nil {
+			if skippableMediaError(err) || isPermanentGIFError(err) {
+				out.Parts = append(out.Parts, &bridgev2.ConvertedMessagePart{ID: networkid.PartID(fmt.Sprintf("gif_%d", i)), Type: event.EventMessage, Content: &event.MessageEventContent{MsgType: event.MsgText, Body: "[GIF unavailable or exceeds the 20 MB limit — open original]\n" + src}})
+				continue
+			}
 			return err
 		}
 		dims, _, err := image.DecodeConfig(bytes.NewReader(data))
@@ -203,4 +211,9 @@ func (c *Client) reactionDataWithMedia(ctx context.Context, p *bridgev2.Portal, 
 		}
 	}
 	return out, nil
+}
+
+func isPermanentGIFError(err error) bool {
+	var apiErr *graph.APIError
+	return errors.As(err, &apiErr) && (apiErr.Status == 400 || apiErr.Status == 410)
 }

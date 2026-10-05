@@ -89,3 +89,36 @@ func TestUnsupportedCustomReactionDoesNotBlockMessages(t *testing.T) {
 		t.Fatal("unsupported custom reaction blocked message", err)
 	}
 }
+
+func TestUnavailableGIFBecomesStableFallback(t *testing.T) {
+	for _, status := range []int{403, 404, 410, 429, 503} {
+		c := &Client{fileHTTP: &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: status, Body: io.NopCloser(bytes.NewReader(nil)), Header: http.Header{}}, nil
+		})}}
+		m := graph.Message{}
+		m.Body.ContentType = "html"
+		m.Body.Content = `<p>Before</p><img src="https://media.giphy.com/missing.gif"><p>After</p>`
+		p := &bridgev2.Portal{Portal: &database.Portal{PortalKey: networkid.PortalKey{ID: "chat"}}}
+		out, err := c.convertMessage(context.Background(), p, nil, m)
+		if status == 429 || status == 503 {
+			if err == nil {
+				t.Fatal("transient failure must retry", status)
+			}
+			continue
+		}
+		if err != nil || len(out.Parts) != 3 || out.Parts[0].Content.Body != "Before" || out.Parts[2].Content.Body != "After" {
+			t.Fatal("permanent GIF error blocked message or lost order", status, err)
+		}
+	}
+	c := &Client{fileHTTP: &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(io.LimitReader(zeroReader{}, maxFileSize+1)), Header: http.Header{}}, nil
+	})}}
+	_, err := c.downloadGIF(context.Background(), "https://media.giphy.com/large.gif")
+	if !skippableMediaError(err) {
+		t.Fatal("oversized GIF must not retry", err)
+	}
+}
+
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) { clear(p); return len(p), nil }

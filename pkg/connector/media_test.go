@@ -149,3 +149,17 @@ func TestImageOnlyAndMixedGIFSourceOrder(t *testing.T) {
 		t.Fatal("image-only HTML order changed")
 	}
 }
+
+func TestDeniedHostedContentListDoesNotBlockMessage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(403) }))
+	defer server.Close()
+	c := &Client{api: &graph.Client{Base: server.URL, HTTP: server.Client(), Token: func(context.Context) (string, error) { return "test", nil }}}
+	m := graph.Message{ID: "msg"}
+	m.Body.ContentType = "html"
+	m.Body.Content = `<p>Hello</p><img src="../hostedContents/image/$value">`
+	p := &bridgev2.Portal{Portal: &database.Portal{PortalKey: networkid.PortalKey{ID: "chat"}}}
+	out, err := c.convertMessage(context.Background(), p, nil, m)
+	if err != nil || !strings.Contains(out.Parts[0].Content.Body, "Hello") || !strings.Contains(out.Parts[0].Content.Body, "access denied") {
+		t.Fatal("denied media blocked the message", err)
+	}
+}

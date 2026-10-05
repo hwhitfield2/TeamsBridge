@@ -96,7 +96,7 @@ func (c *Client) handleExisting(ctx context.Context, p *bridgev2.Portal, intent 
 		result.SaveParts = true
 		return result, nil
 	}
-	result.SubEvents = []bridgev2.RemoteEvent{&simplevent.Message[graph.Message]{EventMeta: simplevent.EventMeta{Type: bridgev2.RemoteEventEdit, PortalKey: p.PortalKey, Sender: c.sender(m.From.User.ID), Timestamp: m.Modified}, TargetMessage: messageID(string(p.ID), m.ID), Data: m, ConvertEditFunc: c.convertEdit}}
+	result.SubEvents = []bridgev2.RemoteEvent{&simplevent.Message[graph.Message]{EventMeta: simplevent.EventMeta{Type: bridgev2.RemoteEventEdit, PortalKey: p.PortalKey, Sender: c.sender(m.From.User.ID), Timestamp: m.Modified}, TargetMessage: messageID(string(p.ID), m.ID), Data: m, ConvertEditFunc: c.convertEditQuietly}}
 	return result, nil
 }
 
@@ -124,7 +124,7 @@ func (c *Client) queueMessage(ctx context.Context, portal string, m graph.Messag
 		if m.From.User == nil || m.From.User.ID == "" || m.MessageType != "message" {
 			return nil
 		}
-		evt = &simplevent.Message[graph.Message]{EventMeta: simplevent.EventMeta{PostHandleFunc: post, Type: bridgev2.RemoteEventMessageUpsert, PortalKey: c.key(portal), CreatePortal: true, Sender: c.sender(m.From.User.ID), Timestamp: m.Created, StreamOrder: m.Created.UnixMilli()}, ID: mid, Data: m, ConvertMessageFunc: c.convertMessage, HandleExistingFunc: c.handleExisting}
+		evt = &simplevent.Message[graph.Message]{EventMeta: simplevent.EventMeta{PostHandleFunc: post, Type: bridgev2.RemoteEventMessageUpsert, PortalKey: c.key(portal), CreatePortal: true, Sender: c.sender(m.From.User.ID), Timestamp: m.Created, StreamOrder: m.Created.UnixMilli()}, ID: mid, Data: m, ConvertMessageFunc: c.convertMessageQuietly, HandleExistingFunc: c.handleExisting}
 	}
 	if !c.login.QueueRemoteEvent(evt).Success {
 		return fmt.Errorf("could not queue Teams message update")

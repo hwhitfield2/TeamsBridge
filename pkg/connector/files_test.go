@@ -1,8 +1,11 @@
 package connector
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"image"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -102,5 +105,24 @@ func TestFileDownloadDoesNotLeakGraphToken(t *testing.T) {
 	item, data, err := c.downloadFile(context.Background(), "https://tenant.sharepoint.com/report.pdf")
 	if err != nil || item.Name != "report.pdf" || string(data) != "data" {
 		t.Fatal(item.Name, string(data), err)
+	}
+}
+
+func TestSharePointImageIsNativeEncryptedImage(t *testing.T) {
+	var data bytes.Buffer
+	png.Encode(&data, image.NewRGBA(image.Rect(0, 0, 12, 7)))
+	c, p := mockActions(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"id":"file","name":"image.png","size":100,"file":{"mimeType":"image/png"},"@microsoft.graph.downloadUrl":"https://tenant.sharepoint.com/download"}`))
+	})
+	c.meta.Token.Scope += " Files.ReadWrite"
+	c.fileHTTP = &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(data.Bytes())), Header: http.Header{}}, nil
+	})}
+	var m graph.Message
+	json.Unmarshal([]byte(`{"attachments":[{"contentType":"reference","contentUrl":"https://tenant.sharepoint.com/image.png","name":"image.png"}]}`), &m)
+	out := convert(m)
+	err := c.appendFiles(context.Background(), p, &mediaIntent{}, m, out)
+	if err != nil || len(out.Parts) != 2 || out.Parts[1].Content.MsgType != event.MsgImage || out.Parts[1].Content.Info.Width != 12 || out.Parts[1].Content.File == nil {
+		t.Fatal("file image was not rendered natively", err)
 	}
 }

@@ -65,6 +65,10 @@ func (c *Client) convertMessage(ctx context.Context, p *bridgev2.Portal, intent 
 		ID string `json:"id"`
 	}](ctx, c.api, path)
 	if err != nil {
+		if skippableMediaError(err) {
+			out.Parts[0].Content.Body += "\n[Teams images unavailable: access denied or content removed — open Teams to view them]"
+			return out, nil
+		}
 		return nil, fmt.Errorf("list Teams images: %w", err)
 	}
 	for i, item := range hosted {

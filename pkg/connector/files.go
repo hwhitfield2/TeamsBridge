@@ -1,10 +1,12 @@
 package connector
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
 	"html"
+	"image"
 	"io"
 	"net/http"
 	"net/url"
@@ -116,6 +118,13 @@ func (c *Client) appendFiles(ctx context.Context, p *bridgev2.Portal, intent bri
 			return err
 		}
 		content := &event.MessageEventContent{MsgType: event.MsgFile, Body: name, FileName: name, URL: mxc, File: file, Info: &event.FileInfo{MimeType: mime, Size: len(data)}}
+		if dims, kind, decodeErr := image.DecodeConfig(bytes.NewReader(data)); decodeErr == nil {
+			content.MsgType = event.MsgImage
+			content.Info.MimeType = http.DetectContentType(data)
+			content.Info.Width = dims.Width
+			content.Info.Height = dims.Height
+			content.Info.MauGIF = kind == "gif"
+		}
 		if file != nil {
 			content.URL = ""
 		}
