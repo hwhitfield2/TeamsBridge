@@ -44,7 +44,7 @@ func (c *Client) convertMessage(ctx context.Context, p *bridgev2.Portal, intent 
 	if !hasImages(m) {
 		return out, nil
 	}
-	path := graph.ChatPath(string(p.ID)) + "/messages/" + url.PathEscape(m.ID) + "/hostedContents"
+	path := messageResource(string(p.ID), m) + "/hostedContents"
 	hosted, err := graph.List[struct {
 		ID string `json:"id"`
 	}](ctx, c.api, path)

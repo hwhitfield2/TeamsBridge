@@ -97,7 +97,14 @@ func (c *Client) IsThisUser(ctx context.Context, id networkid.UserID) bool {
 	return string(id) == c.meta.UserID
 }
 func (c *Client) GetCapabilities(ctx context.Context, p *bridgev2.Portal) *event.RoomFeatures {
-	return &event.RoomFeatures{ID: "teamswork.media.v4", File: event.FileFeatureMap{event.CapMsgGIF: {MimeTypes: map[string]event.CapabilitySupportLevel{"image/gif": event.CapLevelFullySupported, "video/mp4": event.CapLevelPartialSupport}, MaxSize: maxHostedImage, Caption: event.CapLevelFullySupported}, event.CapabilityMsgType(event.MsgImage): {MimeTypes: map[string]event.CapabilitySupportLevel{"image/gif": event.CapLevelFullySupported, "image/png": event.CapLevelFullySupported, "image/jpeg": event.CapLevelFullySupported}, MaxSize: maxHostedImage, Caption: event.CapLevelFullySupported}}, Reply: event.CapLevelFullySupported, Formatting: event.FormattingFeatureMap{event.FmtUserLink: event.CapLevelFullySupported}}
+	features := &event.RoomFeatures{ID: "teamswork.media.v5", File: event.FileFeatureMap{event.CapMsgGIF: {MimeTypes: map[string]event.CapabilitySupportLevel{"image/gif": event.CapLevelFullySupported, "video/mp4": event.CapLevelPartialSupport}, MaxSize: maxHostedImage, Caption: event.CapLevelFullySupported}, event.CapabilityMsgType(event.MsgImage): {MimeTypes: map[string]event.CapabilitySupportLevel{"image/gif": event.CapLevelFullySupported, "image/png": event.CapLevelFullySupported, "image/jpeg": event.CapLevelFullySupported}, MaxSize: maxHostedImage, Caption: event.CapLevelFullySupported}}, Reply: event.CapLevelFullySupported, Formatting: event.FormattingFeatureMap{event.FmtUserLink: event.CapLevelFullySupported}}
+	if p != nil {
+		if _, ok := channelPath(string(p.ID)); ok {
+			features.Thread = event.CapLevelFullySupported
+			features.ID += ".channel"
+		}
+	}
+	return features
 }
 func (c *Client) GetUserInfo(ctx context.Context, g *bridgev2.Ghost) (*bridgev2.UserInfo, error) {
 	return c.profile(ctx, string(g.ID), g.Name), nil
@@ -140,6 +147,9 @@ func (c *Client) chatInfo(chat graph.Chat) *bridgev2.ChatInfo {
 	return &bridgev2.ChatInfo{Name: &name, Type: &kind, Members: members, CanBackfill: true}
 }
 func (c *Client) GetChatInfo(ctx context.Context, p *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
+	if _, ok := channelPath(string(p.ID)); ok {
+		return c.channelInfo(ctx, string(p.ID))
+	}
 	var chat graph.Chat
 	path := graph.ChatPath(string(p.ID))
 	if err := c.api.Do(ctx, "GET", path, nil, &chat); err != nil {
@@ -188,6 +198,9 @@ func (c *Client) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMe
 	return &bridgev2.MatrixMessageResponse{DB: &database.Message{ID: messageID(chat, out.ID), SenderID: networkid.UserID(c.meta.UserID), Timestamp: out.Created}}, nil
 }
 func (c *Client) loop(ctx context.Context) {
+	channelDone := make(chan struct{})
+	go func() { defer close(channelDone); c.channelLoop(ctx) }()
+	defer func() { <-channelDone }()
 	historyDone := make(chan struct{})
 	go func() { defer close(historyDone); c.discoveryLoop(ctx) }()
 	defer func() { <-historyDone }()

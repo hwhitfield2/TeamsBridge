@@ -160,6 +160,10 @@ type Mention struct {
 	} `json:"mentioned"`
 }
 type Message struct {
+	ReplyToID   string     `json:"replyToId"`
+	Subject     string     `json:"subject"`
+	Replies     []Message  `json:"replies"`
+	RepliesNext string     `json:"replies@odata.nextLink"`
 	Mentions    []Mention  `json:"mentions"`
 	ID          string     `json:"id"`
 	Created     time.Time  `json:"createdDateTime"`

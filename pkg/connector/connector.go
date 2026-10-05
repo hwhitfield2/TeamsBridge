@@ -14,11 +14,12 @@ import (
 )
 
 type Config struct {
-	ProfilePhotos   bool   `yaml:"profile_photos"`
-	ClientID        string `yaml:"client_id"`
-	TenantID        string `yaml:"tenant_id"`
-	PollSeconds     int    `yaml:"poll_seconds"`
-	InitialMessages int    `yaml:"initial_messages"`
+	Channels        []ChannelConfig `yaml:"channels"`
+	ProfilePhotos   bool            `yaml:"profile_photos"`
+	ClientID        string          `yaml:"client_id"`
+	TenantID        string          `yaml:"tenant_id"`
+	PollSeconds     int             `yaml:"poll_seconds"`
+	InitialMessages int             `yaml:"initial_messages"`
 }
 
 const example = `client_id: YOUR-APPLICATION-CLIENT-ID
@@ -26,6 +27,7 @@ tenant_id: YOUR-DIRECTORY-TENANT-ID
 poll_seconds: 5
 initial_messages: 50
 profile_photos: false
+channels: []
 `
 
 type Connector struct {
@@ -68,6 +70,7 @@ func (c *Connector) GetConfig() (string, any, up.Upgrader) {
 		h.Copy(up.Int, "poll_seconds")
 		h.Copy(up.Int, "initial_messages")
 		h.Copy(up.Bool, "profile_photos")
+		h.Copy(up.List, "channels")
 	})
 }
 func (c *Connector) GetDBMetaTypes() database.MetaTypes {
@@ -76,7 +79,7 @@ func (c *Connector) GetDBMetaTypes() database.MetaTypes {
 func (c *Connector) GetCapabilities() *bridgev2.NetworkGeneralCapabilities {
 	return &bridgev2.NetworkGeneralCapabilities{}
 }
-func (c *Connector) GetBridgeInfoVersion() (int, int) { return 3, 4 }
+func (c *Connector) GetBridgeInfoVersion() (int, int) { return 3, 5 }
 func (c *Connector) LoadUserLogin(ctx context.Context, l *bridgev2.UserLogin) error {
 	m, ok := l.Metadata.(*Metadata)
 	if !ok {

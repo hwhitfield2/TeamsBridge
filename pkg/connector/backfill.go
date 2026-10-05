@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 	"teamsbridge.local/teamsbridge/internal/graph"
 	"time"
 )
@@ -15,7 +16,8 @@ import (
 var _ bridgev2.BackfillingNetworkAPI = (*Client)(nil)
 
 func (c *Client) FetchMessages(ctx context.Context, p bridgev2.FetchMessagesParams) (*bridgev2.FetchMessagesResponse, error) {
-	if p.ThreadRoot != "" {
+	channel, isChannel := channelPath(string(p.Portal.ID))
+	if p.ThreadRoot != "" && !isChannel {
 		return nil, fmt.Errorf("Teams thread backfill is not supported")
 	}
 	count := p.Count
@@ -30,6 +32,12 @@ func (c *Client) FetchMessages(ctx context.Context, p bridgev2.FetchMessagesPara
 		}
 		path = graph.ChatPath(string(p.Portal.ID)) + "/messages?" + q.Encode()
 	}
+	if isChannel && (string(p.Cursor) == "" || p.Forward) {
+		path = channel + "/messages?$top=50&$expand=replies"
+		if p.ThreadRoot != "" {
+			path = channel + "/messages/" + url.PathEscape(strings.TrimPrefix(string(p.ThreadRoot), string(p.Portal.ID)+"/")) + "/replies?$top=50"
+		}
+	}
 	var page struct {
 		Value []graph.Message `json:"value"`
 		Next  string          `json:"@odata.nextLink"`
@@ -39,6 +47,13 @@ func (c *Client) FetchMessages(ctx context.Context, p bridgev2.FetchMessagesPara
 	}
 	if page.Next != "" && page.Next == path {
 		return nil, fmt.Errorf("Teams returned a repeating backfill cursor")
+	}
+	if isChannel {
+		var err error
+		page.Value, err = c.flattenChannel(ctx, page.Value)
+		if err != nil {
+			return nil, err
+		}
 	}
 	out := &bridgev2.FetchMessagesResponse{Cursor: networkid.PaginationCursor(page.Next), HasMore: page.Next != "", Forward: p.Forward, MarkRead: true, AggressiveDeduplication: true}
 	for _, m := range page.Value {
