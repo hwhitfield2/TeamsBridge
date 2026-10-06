@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"teamsbridge.local/teamsbridge/internal/graph"
 	"time"
 )
@@ -84,6 +85,12 @@ func (c *Client) flattenChannel(ctx context.Context, roots []graph.Message) ([]g
 }
 func (c *Client) syncChannel(ctx context.Context, cfg ChannelConfig) error {
 	portal := cfg.portalID()
+	value, _ := c.chatSync.LoadOrStore(portal, &sync.Mutex{})
+	lock := value.(*sync.Mutex)
+	if !lock.TryLock() {
+		return nil
+	}
+	defer lock.Unlock()
 	path, _ := channelPath(portal)
 	info, err := c.channelInfo(ctx, portal)
 	if err != nil {

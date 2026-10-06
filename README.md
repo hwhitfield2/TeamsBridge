@@ -151,3 +151,56 @@ The Teams channel link supplies the `groupId` and encoded channel ID. The bridge
 - [Upload files](https://learn.microsoft.com/en-us/graph/api/driveitem-put-content?view=graph-rest-1.0), [grant recipient access](https://learn.microsoft.com/en-us/graph/api/driveitem-invite?view=graph-rest-1.0), and [send reference attachments/cards](https://learn.microsoft.com/en-us/graph/api/chatmessage-post?view=graph-rest-1.0).
 
 New direct chats are available through the bridge's `start-chat <user ID or sign-in address>` bot command and provisioning API. Group creation is exposed through bridgev2's group-creation provisioning API; Beeper client versions may differ in whether they show that control. Creating meeting chats is not supported; existing meeting chats are discovered automatically.
+
+### Push notifications through an HTTPS tunnel
+
+Push delivery is optional. Each installation supplies its own public HTTPS origin
+in the private `config.yaml` (which is ignored by Git):
+
+```yaml
+network:
+    webhook_url: https://teams.example.com
+    webhook_listen: 127.0.0.1:29320
+```
+
+Keep the other `network` settings. Leave `webhook_url` blank to disable push.
+Forward the tunnel to `http://127.0.0.1:29320`. Microsoft must be able to POST to
+`/graph/notifications` without an access-login screen or bot challenge; the same
+path handles endpoint validation and subscription lifecycle events. `/healthz`
+returns `ok` when the listener is running. This is a separate listener from OAuth
+and the Matrix appservice; do not expose their ports through this tunnel.
+
+After restarting, the bridge creates a delegated user-wide subscription for all
+chats (including group and meeting chats) and a subscription for each configured
+channel. Existing `Chat.Read`/`Chat.ReadWrite` and `ChannelMessage.Read.All` grants
+are used. User-wide subscriptions use Microsoft's documented **beta** subscription
+endpoint; channel subscriptions and message retrieval use v1.0. If Microsoft
+rejects a subscription, the bridge logs the failure and continues polling.
+
+Notifications trigger an immediate fetch of the changed message, including
+edits, deletion and reaction updates. Channel replies use their own message
+resource, even when their parent falls outside the recent-channel polling window.
+Microsoft reports typical message notification latency below 10 seconds, with up
+to a minute expected; this is near-real-time delivery, not a guarantee of instant
+arrival. Sending from Beeper continues to use the existing immediate send path.
+
+The bridge verifies the subscription ID, tenant, random client-state secret and
+resource scope, saves accepted notifications to its database before acknowledging
+them, and retries failed processing after restart. Subscription IDs and secrets
+are stored in private login metadata. Two-hour subscriptions are renewed roughly
+every 30 minutes, and lifecycle notifications trigger reauthorization or recovery.
+Existing polling stays enabled to catch missed notifications and tunnel outages.
+Beeper, the bridge, and the tunnel must remain running for push delivery. A stable
+tunnel hostname avoids replacement subscriptions. To change it, update the local
+`webhook_url` and restart; only this bridge's saved subscriptions are replaced.
+Disabling push or stopping the bridge lets its subscriptions expire within two
+hours; reopening restores them automatically.
+
+Verification: check the public `/healthz`, then look for `Teams push subscription
+active` and `Teams push update delivered` in `logs/bridge.log`. Health only confirms
+the listener, not subscription approval. Do not share the database, tokens,
+client-state values, or private config when reporting a problem.
+
+References: [Teams message notifications](https://learn.microsoft.com/en-us/graph/teams-changenotifications-chatmessage),
+[webhook delivery](https://learn.microsoft.com/en-us/graph/change-notifications-delivery-webhooks),
+and [subscription lifetime and latency](https://learn.microsoft.com/en-us/graph/api/resources/subscription?view=graph-rest-1.0).

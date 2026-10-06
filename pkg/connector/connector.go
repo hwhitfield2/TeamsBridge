@@ -7,6 +7,7 @@ import (
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -15,6 +16,8 @@ import (
 )
 
 type Config struct {
+	WebhookURL      string          `yaml:"webhook_url"`
+	WebhookListen   string          `yaml:"webhook_listen"`
 	Channels        []ChannelConfig `yaml:"channels"`
 	ProfilePhotos   bool            `yaml:"profile_photos"`
 	ClientID        string          `yaml:"client_id"`
@@ -26,18 +29,24 @@ type Config struct {
 const example = `client_id: YOUR-APPLICATION-CLIENT-ID
 tenant_id: YOUR-DIRECTORY-TENANT-ID
 poll_seconds: 5
+webhook_url: ""
+webhook_listen: 127.0.0.1:29320
 initial_messages: 50
 profile_photos: false
 channels: []
 `
 
 type Connector struct {
-	Bridge *bridgev2.Bridge
-	Config Config
+	webServer  *http.Server
+	webClients sync.Map
+	Bridge     *bridgev2.Bridge
+	Config     Config
 }
 type Metadata struct {
-	Media             map[string]string `json:"media,omitempty"`
-	RenderingRevision int               `json:"rendering_revision,omitempty"`
+	WebhookSecret     string                       `json:"webhook_secret,omitempty"`
+	Subscriptions     map[string]GraphSubscription `json:"subscriptions,omitempty"`
+	Media             map[string]string            `json:"media,omitempty"`
+	RenderingRevision int                          `json:"rendering_revision,omitempty"`
 	mu                sync.Mutex
 	Auth              *LoginSettings       `json:"auth,omitempty"`
 	Token             graph.Token          `json:"token"`
@@ -58,7 +67,7 @@ func (c *Connector) Start(ctx context.Context) error {
 	if c.Config.InitialMessages < 1 || c.Config.InitialMessages > 50 {
 		return fmt.Errorf("initial_messages must be 1–50")
 	}
-	return nil
+	return c.startWebhook()
 }
 func (c *Connector) oauth() graph.OAuth {
 	return graph.OAuth{ClientID: c.Config.ClientID, TenantID: c.Config.TenantID, SecretFile: ".secrets/client-secret"}
@@ -71,6 +80,8 @@ func (c *Connector) GetConfig() (string, any, up.Upgrader) {
 		h.Copy(up.Str, "client_id")
 		h.Copy(up.Str, "tenant_id")
 		h.Copy(up.Int, "poll_seconds")
+		h.Copy(up.Str, "webhook_url")
+		h.Copy(up.Str, "webhook_listen")
 		h.Copy(up.Int, "initial_messages")
 		h.Copy(up.Bool, "profile_photos")
 		h.Copy(up.List, "channels")

@@ -18,24 +18,26 @@ import (
 )
 
 type Client struct {
-	mediaMu       sync.Mutex
-	fileHTTP      *http.Client
-	chatSync      sync.Map
-	receipts      sync.Map
-	appNames      sync.Map
-	memberUpdated sync.Map
-	recentSeen    map[string]recentStamp
-	main          *Connector
-	login         *bridgev2.UserLogin
-	meta          *Metadata
-	api           *graph.Client
-	authMu        sync.Mutex
-	lifeMu        sync.Mutex
-	cancel        context.CancelFunc
-	done          chan struct{}
-	logged        atomic.Bool
-	profileMu     sync.Mutex
-	profiles      map[string]profileCacheEntry
+	webWake        chan struct{}
+	subscriptionMu sync.Mutex
+	mediaMu        sync.Mutex
+	fileHTTP       *http.Client
+	chatSync       sync.Map
+	receipts       sync.Map
+	appNames       sync.Map
+	memberUpdated  sync.Map
+	recentSeen     map[string]recentStamp
+	main           *Connector
+	login          *bridgev2.UserLogin
+	meta           *Metadata
+	api            *graph.Client
+	authMu         sync.Mutex
+	lifeMu         sync.Mutex
+	cancel         context.CancelFunc
+	done           chan struct{}
+	logged         atomic.Bool
+	profileMu      sync.Mutex
+	profiles       map[string]profileCacheEntry
 }
 
 var _ bridgev2.NetworkAPI = (*Client)(nil)
@@ -233,6 +235,16 @@ func (c *Client) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMe
 	return &bridgev2.MatrixMessageResponse{DB: db}, nil
 }
 func (c *Client) loop(ctx context.Context) {
+	if c.main.Config.WebhookURL != "" {
+		if c.webWake == nil {
+			c.webWake = make(chan struct{}, 1)
+		}
+		c.main.webClients.Store(c.login.ID, c)
+		defer c.main.webClients.Delete(c.login.ID)
+		webDone := make(chan struct{})
+		go func() { defer close(webDone); c.webhookLoop(ctx) }()
+		defer func() { <-webDone }()
+	}
 	channelDone := make(chan struct{})
 	go func() { defer close(channelDone); c.channelLoop(ctx) }()
 	defer func() { <-channelDone }()
