@@ -49,7 +49,14 @@ func (c *Client) processQueuedNotification(ctx context.Context) (bool, error) {
 	}
 	if err != nil {
 		delay := time.Minute
+		var pending *deferredMessageError
+		if errors.As(err, &pending) && time.Until(pending.retryAt) > delay {
+			delay = time.Until(pending.retryAt)
+		}
 		var ge *graph.APIError
+		if errors.As(err, &ge) && ge.Status == 403 {
+			delay = 15 * time.Minute
+		}
 		if errors.As(err, &ge) && ge.RetryAfter > delay {
 			delay = ge.RetryAfter
 		}

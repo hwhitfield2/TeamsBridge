@@ -42,7 +42,7 @@ func (c *Client) syncRecent(ctx context.Context) error {
 			continue
 		}
 		err := c.syncChat(ctx, chat)
-		if errors.Is(err, errChatSyncBusy) {
+		if errors.Is(err, errChatSyncBusy) || isDeferredMessage(err) {
 			continue
 		}
 		if err != nil {

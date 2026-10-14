@@ -18,26 +18,27 @@ import (
 )
 
 type Client struct {
-	webWake        chan struct{}
-	subscriptionMu sync.Mutex
-	mediaMu        sync.Mutex
-	fileHTTP       *http.Client
-	chatSync       sync.Map
-	receipts       sync.Map
-	appNames       sync.Map
-	memberUpdated  sync.Map
-	recentSeen     map[string]recentStamp
-	main           *Connector
-	login          *bridgev2.UserLogin
-	meta           *Metadata
-	api            *graph.Client
-	authMu         sync.Mutex
-	lifeMu         sync.Mutex
-	cancel         context.CancelFunc
-	done           chan struct{}
-	logged         atomic.Bool
-	profileMu      sync.Mutex
-	profiles       map[string]profileCacheEntry
+	deferredMessages sync.Map
+	webWake          chan struct{}
+	subscriptionMu   sync.Mutex
+	mediaMu          sync.Mutex
+	fileHTTP         *http.Client
+	chatSync         sync.Map
+	receipts         sync.Map
+	appNames         sync.Map
+	memberUpdated    sync.Map
+	recentSeen       map[string]recentStamp
+	main             *Connector
+	login            *bridgev2.UserLogin
+	meta             *Metadata
+	api              *graph.Client
+	authMu           sync.Mutex
+	lifeMu           sync.Mutex
+	cancel           context.CancelFunc
+	done             chan struct{}
+	logged           atomic.Bool
+	profileMu        sync.Mutex
+	profiles         map[string]profileCacheEntry
 }
 
 var _ bridgev2.NetworkAPI = (*Client)(nil)

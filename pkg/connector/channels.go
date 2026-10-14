@@ -109,12 +109,7 @@ func (c *Client) syncChannel(ctx context.Context, cfg ChannelConfig) error {
 	if err != nil {
 		return err
 	}
-	for _, m := range messages {
-		if err := c.queueMessage(ctx, portal, m, true); err != nil {
-			return err
-		}
-	}
-	return nil
+	return deliverMessageBatch(messages, func(m graph.Message) error { return c.queueMessage(ctx, portal, m, true) })
 }
 func (c *Client) channelLoop(ctx context.Context) {
 	if len(c.main.Config.Channels) == 0 {

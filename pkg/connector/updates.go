@@ -65,7 +65,7 @@ func (c *Client) convertEdit(ctx context.Context, p *bridgev2.Portal, intent bri
 	// additional events at an existing message's position in this timeline.
 	for _, part := range converted.Parts {
 		if parts[part.ID] == nil {
-			return nil, fmt.Errorf("cannot insert additional parts into an existing Matrix message; rebuild the Beeper chat to repair its layout")
+			return nil, errMessageLayout
 		}
 	}
 	for _, part := range converted.Parts {
@@ -105,6 +105,9 @@ func (c *Client) handleExisting(ctx context.Context, p *bridgev2.Portal, intent 
 // and deletions. A failed delivery is replayed on the next poll.
 func (c *Client) queueMessage(ctx context.Context, portal string, m graph.Message, wait bool) error {
 	m = c.normalizeSender(m)
+	if err := c.deferredMessage(portal, m); err != nil {
+		return err
+	}
 	if m.ID == "" {
 		return nil
 	}
@@ -148,6 +151,9 @@ func (c *Client) queueMessage(ctx context.Context, portal string, m graph.Messag
 		}
 
 		if !delivered {
+			if err := c.deferredMessage(portal, m); err != nil {
+				return err
+			}
 			return fmt.Errorf("Teams message update was not saved; retrying next poll")
 		}
 	}

@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
@@ -27,5 +28,8 @@ func (c *Client) convertMessageQuietly(ctx context.Context, p *bridgev2.Portal, 
 }
 func (c *Client) convertEditQuietly(ctx context.Context, p *bridgev2.Portal, intent bridgev2.MatrixAPI, existing []*database.Message, m graph.Message) (*bridgev2.ConvertedEdit, error) {
 	out, err := c.convertEdit(ctx, p, intent, existing, m)
+	if errors.Is(err, errMessageLayout) {
+		c.deferredMessages.Store(messageID(string(p.ID), m.ID), &deferredMessageError{hash: contentHash(m), retryAt: time.Now().Add(5 * time.Minute), cause: err})
+	}
 	return out, quietConversionError(ctx, err)
 }

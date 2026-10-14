@@ -121,9 +121,9 @@ func (c *Client) syncChat(ctx context.Context, chat graph.Chat) error {
 		if m.Created.After(next) {
 			next = m.Created
 		}
-		if err := c.queueMessage(ctx, chat.ID, m, true); err != nil {
-			return err
-		}
+	}
+	if err := deliverMessageBatch(messages, func(m graph.Message) error { return c.queueMessage(ctx, chat.ID, m, true) }); err != nil {
+		return err
 	}
 	if next.IsZero() {
 		next = time.Now().Add(-2 * time.Minute)
