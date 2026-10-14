@@ -22,7 +22,14 @@ func (c *Client) ResolveIdentifier(ctx context.Context, identifier string, creat
 	if user.ID == "" {
 		return nil, fmt.Errorf("Teams user was not found")
 	}
-	out := &bridgev2.ResolveIdentifierResponse{UserID: networkid.UserID(user.ID), UserInfo: &bridgev2.UserInfo{Name: &user.DisplayName}}
+	// The provisioning adapter only includes the contact MXID when Ghost is
+	// present. Returning UserID/UserInfo alone loses recipient identity even
+	// when DMRoomID and the Teams destination are correct.
+	ghost, err := c.main.Bridge.GetGhostByID(ctx, networkid.UserID(user.ID))
+	if err != nil {
+		return nil, fmt.Errorf("resolve Beeper contact: %w", err)
+	}
+	out := &bridgev2.ResolveIdentifierResponse{Ghost: ghost, UserID: networkid.UserID(user.ID), UserInfo: &bridgev2.UserInfo{Name: &user.DisplayName}}
 	if createChat {
 		chat, err := c.createChat(ctx, "oneOnOne", "", []networkid.UserID{out.UserID})
 		if err != nil {
@@ -86,3 +93,14 @@ func (c *Client) createChat(ctx context.Context, kind, name string, users []netw
 }
 
 var _ bridgev2.GroupCreatingNetworkAPI = (*Client)(nil)
+
+// Preserve the already-resolved ghost in bridgev2's provisioning response when
+// starting a DM from a contact picker or accepting a Matrix ghost invitation.
+func (c *Client) CreateChatWithGhost(ctx context.Context, ghost *bridgev2.Ghost) (*bridgev2.CreateChatResponse, error) {
+	if ghost == nil || ghost.ID == "" {
+		return nil, fmt.Errorf("missing Teams contact")
+	}
+	return c.createChat(ctx, "oneOnOne", "", []networkid.UserID{ghost.ID})
+}
+
+var _ bridgev2.GhostDMCreatingNetworkAPI = (*Client)(nil)
