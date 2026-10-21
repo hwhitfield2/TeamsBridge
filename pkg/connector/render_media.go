@@ -19,7 +19,7 @@ import (
 	"teamsbridge.local/teamsbridge/internal/graph"
 )
 
-const renderingRevision = 7
+const renderingRevision = 8
 
 func approvedGIFURL(raw string) bool {
 	u, err := url.Parse(raw)

@@ -3,6 +3,7 @@ package connector
 import (
 	"html"
 	"net/url"
+	"strconv"
 	"strings"
 
 	xhtml "golang.org/x/net/html"
@@ -42,6 +43,15 @@ func matrixHTML(source string) string {
 		}
 		if allowed {
 			out.WriteString("<" + tag)
+			if tag == "ol" {
+				for _, a := range n.Attr {
+					if a.Key == "start" {
+						if n, err := strconv.Atoi(a.Val); err == nil && n > 0 {
+							out.WriteString(` start="` + strconv.Itoa(n) + `"`)
+						}
+					}
+				}
+			}
 			if tag == "a" {
 				for _, a := range n.Attr {
 					if a.Key != "href" {

@@ -60,7 +60,7 @@ func (c *Client) repairChatRendering(ctx context.Context, chat graph.Chat) error
 		}
 		// Repairs must not introduce older bot messages at the live end of a
 		// timeline. Missing messages are imported by normal history backfill.
-		if repairableBotHTML(m) {
+		if repairableBotHTML(m) || repairableCard(m) {
 			existing, lookupErr := c.main.Bridge.DB.Message.GetFirstPartByID(ctx, c.login.ID, messageID(chat.ID, m.ID))
 			if lookupErr != nil {
 				return lookupErr
@@ -82,9 +82,26 @@ func repairableBotHTML(m graph.Message) bool {
 	return m.From.Application != nil && strings.EqualFold(m.Body.ContentType, "html") && len(m.Attachments) == 0 && !hasImages(m)
 }
 func needsBotHTMLRepair(parts []*database.Message, m graph.Message) bool {
-	if !repairableBotHTML(m) || len(parts) != 1 || parts[0].PartID != "" {
+	if (!repairableBotHTML(m) && !repairableCard(m)) || len(parts) != 1 || parts[0].PartID != "" {
 		return false
 	}
 	old, _ := parts[0].Metadata.(*MessageMetadata)
-	return old == nil || old.RenderingRevision < 7
+	revision := 7
+	if repairableCard(m) {
+		revision = 8
+	}
+	return old == nil || old.RenderingRevision < revision
+}
+
+// Card-only single-event messages can be edited without moving media parts.
+func repairableCard(m graph.Message) bool {
+	if len(m.Attachments) == 0 || hasImages(m) {
+		return false
+	}
+	for _, a := range m.Attachments {
+		if !strings.Contains(a.ContentType, "card") {
+			return false
+		}
+	}
+	return true
 }

@@ -151,32 +151,40 @@ func convert(m graph.Message) *bridgev2.ConvertedMessage {
 		formatted = matrixHTML(body)
 		body = format.HTMLToText(formatted)
 	}
-	baseBody := body
+	hasFormatting := formatted != ""
+	if formatted == "" {
+		formatted = plainHTML(body)
+	}
 	for _, a := range m.Attachments {
 		if a.ContentType == "messageReference" {
 			continue
 		}
 		if strings.Contains(a.ContentType, "card") {
-			body += "\n" + renderCard(a.Content)
+			hasFormatting = true
+			cardHTML := renderCardHTML(a.Content)
+			body += "\n" + format.HTMLToText(cardHTML)
+			formatted += cardHTML
 			continue
 		}
 		name := strings.TrimSpace(a.Name)
 		if name == "" {
 			name = "Teams attachment — open Teams to view it"
 		}
-		body += "\n[Attachment: " + name + "]"
+		attachment := "\n[Attachment: " + name + "]"
 		u, err := url.Parse(a.ContentURL)
 		if err == nil && u.Scheme == "https" && u.Host != "" {
-			body += " " + u.String()
+			attachment += " " + u.String()
 		}
+		body += attachment
+		formatted += plainHTML(attachment)
 	}
 	if strings.TrimSpace(body) == "" {
 		body = "[Teams message: open Teams to view this content]"
 	}
 	content := &event.MessageEventContent{MsgType: event.MsgText, Body: body}
-	if formatted != "" {
+	if hasFormatting && formatted != "" {
 		content.Format = event.FormatHTML
-		content.FormattedBody = formatted + plainHTML(strings.TrimPrefix(body, baseBody))
+		content.FormattedBody = formatted
 	}
 	return &bridgev2.ConvertedMessage{Parts: []*bridgev2.ConvertedMessagePart{{Type: event.EventMessage, Content: content}}}
 }
